@@ -1,6 +1,6 @@
 """sindy-rnn: Polynomial RNN for Sparse Nonlinear Dynamics Discovery."""
 
-from .model import PolynomialRNN, EnsembleRNNModule, EnsemblePolynomialLayer, EnsembleLinear
+from .model import PolynomialRNN, EnsembleRNNModule, EnsemblePolynomialLayer, DecomposedPolynomialLayer, EnsembleLinear
 from .training import fit
 from .polynomial_library import (
     build_library_structure,
@@ -10,12 +10,16 @@ from .polynomial_library import (
 )
 from .equations import get_coefficients, get_equations, get_continuous_equations
 from .pruning import ensemble_prune, threshold_prune, minimum_effect_ci_test
+from .autoencoder import SparseAutoencoderRNN, fit_autoencoder
 
 __all__ = [
     'PolynomialRNN',
     'fit',
+    'SparseAutoencoderRNN',
+    'fit_autoencoder',
     'EnsembleRNNModule',
     'EnsemblePolynomialLayer',
+    'DecomposedPolynomialLayer',
     'EnsembleLinear',
     'build_library_structure',
     'compute_library_size',

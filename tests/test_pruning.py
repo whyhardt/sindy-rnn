@@ -78,9 +78,11 @@ def test_pruning_fires_at_patience_2():
     """Terms should be permanently pruned after 2 consecutive failures."""
     torch.manual_seed(0)
 
+    # Use decomposed=False so we can directly access .weights/.biases
     model = PolynomialRNN(
         n_states=1, n_controls=0, ensemble_size=5,
         polynomial_degree=2, compiled_forward=False,
+        decomposed=False,
     )
 
     # Make all polynomial weights very small so all terms fail CI test
@@ -111,13 +113,50 @@ def test_pruning_fires_at_patience_2():
     assert model.coefficient_masks[:, 0, self_idx].all()
 
 
+def test_pruning_fires_at_patience_2_decomposed():
+    """Terms should be permanently pruned after 2 consecutive failures (decomposed)."""
+    torch.manual_seed(0)
+
+    model = PolynomialRNN(
+        n_states=1, n_controls=0, ensemble_size=5,
+        polynomial_degree=2, compiled_forward=False,
+        decomposed=True,
+    )
+
+    # Make all polynomial weights very small so all terms fail CI test
+    proj = model.rnn.projection
+    with torch.no_grad():
+        proj.constant_bias.fill_(0.0)
+        proj.linear_weight.fill_(0.0)
+        for weights in proj.higher_degree_weights.values():
+            for w in weights:
+                w.fill_(0.0)
+
+    # All masks should start as True
+    assert model.coefficient_masks.all()
+
+    # First pruning step - patience goes to 1
+    with torch.no_grad():
+        ensemble_prune(model, alpha=0.05, delta=0.01)
+
+    # Second pruning step - patience goes to 2, pruning fires
+    with torch.no_grad():
+        ensemble_prune(model, alpha=0.05, delta=0.01)
+
+    # Self-term should survive due to (1-alpha) ~ 0.95
+    self_idx = model.rnn._linear_indices[0].item()
+    assert model.coefficient_masks[:, 0, self_idx].all()
+
+
 def test_threshold_pruning_single_ensemble():
     """Threshold pruning for single ensemble member."""
     torch.manual_seed(0)
 
+    # Use decomposed=False so we can directly access .weights/.biases
     model = PolynomialRNN(
         n_states=2, n_controls=0, ensemble_size=1,
         polynomial_degree=2, compiled_forward=False,
+        decomposed=False,
     )
 
     # Make weights tiny

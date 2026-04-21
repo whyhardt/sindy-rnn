@@ -1,6 +1,7 @@
 """Test polynomial coefficient unfolding correctness."""
 
 import torch
+import torch.nn as nn
 import pytest
 from sindy_rnn import PolynomialRNN
 from sindy_rnn.polynomial_library import build_library_structure, get_library_feature_names
@@ -54,6 +55,7 @@ def test_unfolding_degree1():
     model = PolynomialRNN(
         n_states=2, n_controls=1, ensemble_size=1,
         polynomial_degree=1, compiled_forward=False,
+        decomposed=False,
     )
 
     # Get the single weight matrix and bias
@@ -90,6 +92,7 @@ def test_unfolding_known_degree2():
     model = PolynomialRNN(
         n_states=1, n_controls=0, ensemble_size=1,
         polynomial_degree=2, compiled_forward=False,
+        decomposed=False,
     )
 
     # Set known weights
@@ -138,6 +141,7 @@ def test_unfolding_known_degree2_multivariate():
     model = PolynomialRNN(
         n_states=2, n_controls=0, ensemble_size=1,
         polynomial_degree=2, compiled_forward=False,
+        decomposed=False,
     )
 
     # Set known weights for output dimension 0 only
@@ -170,17 +174,115 @@ def test_unfolding_known_degree2_multivariate():
     torch.testing.assert_close(t, expected, rtol=1e-5, atol=1e-6)
 
 
-def test_unfolding_differentiable():
+@pytest.mark.parametrize("decomposed", [True, False])
+def test_unfolding_differentiable(decomposed):
     """Verify that unfold_polynomial_coefficients is differentiable."""
     model = PolynomialRNN(
         n_states=2, n_controls=0, ensemble_size=1,
         polynomial_degree=2, compiled_forward=False,
+        decomposed=decomposed,
     )
 
     theta = model.rnn.unfold_polynomial_coefficients()
     loss = theta.sum()
     loss.backward()
 
-    for w in model.rnn.projection.weights:
-        assert w.grad is not None
-        assert not torch.all(w.grad == 0)
+    # Check that gradients flow to all parameters
+    for p in model.rnn.projection.parameters():
+        assert p.grad is not None
+        assert not torch.all(p.grad == 0)
+
+
+def test_decomposed_degree_isolation():
+    """Verify that decomposed layer produces only degree-d terms per component.
+
+    With degree-2 weights zeroed, theta should have no degree-2 monomials.
+    With linear weight zeroed, theta should have no linear monomials.
+    """
+    torch.manual_seed(42)
+
+    model = PolynomialRNN(
+        n_states=2, n_controls=0, ensemble_size=1,
+        polynomial_degree=2, compiled_forward=False,
+        decomposed=True,
+    )
+
+    proj = model.rnn.projection
+    lib_terms = model.rnn._library_terms
+
+    # Zero out degree-2 weights, keep linear and constant
+    with torch.no_grad():
+        for w in proj.higher_degree_weights['2']:
+            w.fill_(0.0)
+
+    theta = model.rnn.unfold_polynomial_coefficients()  # (1, 2, 6)
+
+    # Degree-2 term indices: terms with len >= 2
+    for t_idx, term in enumerate(lib_terms):
+        if len(term) >= 2:
+            assert torch.allclose(theta[:, :, t_idx], torch.zeros_like(theta[:, :, t_idx])), \
+                f"Degree-2 term {t_idx} ({term}) should be zero but got {theta[:, :, t_idx]}"
+
+    # Linear and constant terms should be non-zero (from linear_weight and constant_bias)
+    # Linear weight was xavier-initialized, so it should be non-zero
+    linear_indices = model.rnn._linear_indices
+    assert not torch.allclose(theta[:, :, linear_indices], torch.zeros(1, 2, 2))
+
+    # Now zero linear weight, restore degree-2 weights
+    with torch.no_grad():
+        proj.linear_weight.fill_(0.0)
+        proj.constant_bias.fill_(0.0)
+        for w in proj.higher_degree_weights['2']:
+            nn.init.xavier_normal_(w, gain=1.0)
+
+    theta2 = model.rnn.unfold_polynomial_coefficients()
+
+    # Constant and linear terms should be zero
+    assert torch.allclose(theta2[:, :, model.rnn._bias_index], torch.zeros(1, 2))
+    for li in linear_indices:
+        assert torch.allclose(theta2[:, :, li], torch.zeros(1, 2)), \
+            f"Linear term {li} should be zero"
+
+
+def test_decomposed_known_degree2():
+    """Test decomposed unfolding with known weights for degree 2.
+
+    For 1 feature (n_states=1, n_controls=0), degree 2:
+    Decomposed = bias + W*x + (W2a*x)(W2b*x)/sqrt(2)
+
+    With known values:
+        bias = c, W = [w], W2a = [a], W2b = [b]
+        P(x) = c + w*x + a*b*x^2/sqrt(2)
+    """
+    import math
+    torch.manual_seed(42)
+
+    model = PolynomialRNN(
+        n_states=1, n_controls=0, ensemble_size=1,
+        polynomial_degree=2, compiled_forward=False,
+        decomposed=True,
+    )
+
+    c_val = 1.5
+    w_val = -2.0
+    a_val = 3.0
+    b_val = 0.5
+
+    proj = model.rnn.projection
+    with torch.no_grad():
+        proj.constant_bias[0, 0] = c_val
+        proj.linear_weight[0, 0, 0] = w_val
+        proj.higher_degree_weights['2'][0][0, 0, 0] = a_val
+        proj.higher_degree_weights['2'][1][0, 0, 0] = b_val
+
+    theta = model.rnn.unfold_polynomial_coefficients()  # (1, 1, 3)
+
+    sqrt2 = math.sqrt(2)
+    expected_const = c_val
+    expected_linear = w_val
+    expected_quad = a_val * b_val / sqrt2
+
+    assert theta.shape == (1, 1, 3)
+    torch.testing.assert_close(theta[0, 0, 0], torch.tensor(expected_const), rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(theta[0, 0, 1], torch.tensor(expected_linear), rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(theta[0, 0, 2], torch.tensor(expected_quad), rtol=1e-5, atol=1e-6)

@@ -111,6 +111,7 @@ def run_experiment(noise_std, trajectory_clean, config, seed=42):
         dropout=config['dropout'],
         feature_dropout=config['feature_dropout'],
         compiled_forward=False,
+        decomposed=False,
     ).to(DEVICE)
 
     fit(model, xs, ys,
@@ -125,6 +126,7 @@ def run_experiment(noise_std, trajectory_clean, config, seed=42):
         learning_rate=config['learning_rate'],
         l2=config['l2'],
         dt=config['dt'],
+        refit_epochs=0,
         verbose=True,
     )
 
@@ -165,18 +167,18 @@ def main():
         'dt': 0.01,
         'n_steps': 10000,
         'ensemble_size': 11,
-        'degree': 3,
-        'epochs': 10000,
+        'degree': 2,
+        'epochs': 1000,
         'warmup_steps': 500,
         'window_size': 100,
         'learning_rate': 1e-2,
         'l2': 5e-2,
         'pruning_frequency': 20,
-        'pruning_threshold': 0.1,
+        'pruning_threshold': 0.5,
         'ensemble_pruning_alpha': 0.05,
         'feature_dropout': 0.,
         'dropout': 0.1,
-        'noise_fractions': [0., 0.01, 0.02, 0.05, 0.1],
+        'noise_fractions': [0.],#, 0.01, 0.02, 0.05, 0.1],
     }
 
     print(f"\nSettings: {config}")

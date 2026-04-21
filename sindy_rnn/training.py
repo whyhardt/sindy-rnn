@@ -27,6 +27,8 @@ def fit(
     dt: Optional[float] = None,
     include_bias: bool = True,
     interaction_only: bool = False,
+    refit_epochs: int = 0,
+    refit_learning_rate: Optional[float] = None,
     verbose: bool = True,
 ):
     """Train the PolynomialRNN.
@@ -40,7 +42,7 @@ def fit(
         warmup_steps: epochs before pruning begins (default: epochs // 4)
         batch_size: mini-batch size over sequences (None = full batch)
         learning_rate: Adam learning rate
-        l2: L2 penalty on unfolded polynomial coefficients
+        l2: L1 penalty weight on unfolded polynomial coefficients
         pruning_frequency: epochs between pruning events
         pruning_threshold: minimum effect size delta for CI test (and threshold fallback).
             When dt is provided, this is in continuous-time (ODE) units.
@@ -52,6 +54,10 @@ def fit(
             coefficients (c/dt), making pruning_threshold interpretable in ODE units.
         include_bias: if False, mask out constant term before training
         interaction_only: if True, mask out pure power terms before training
+        refit_epochs: additional epochs with l2=0 and frozen mask after pruning.
+            Debiases coefficient estimates by removing L1 shrinkage on the
+            identified support. 0 = no refit (default).
+        refit_learning_rate: learning rate for refit phase (default: learning_rate / 5)
         verbose: print training progress every 50 epochs
     """
     if warmup_steps is None:
@@ -145,3 +151,53 @@ def fit(
     except KeyboardInterrupt:
         if verbose:
             print(f"\nTraining interrupted at epoch {epoch}.")
+
+    # Post-pruning refit: train with l2=0 and frozen mask to debias coefficients
+    if refit_epochs > 0:
+        refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate / 5
+        refit_optimizer = torch.optim.Adam(model.parameters(), lr=refit_lr)
+
+        if verbose:
+            active = model.count_active_terms()
+            total_active = sum(active.values())
+            print(f"\nRefit phase: {refit_epochs} epochs, lr={refit_lr:.1e}, "
+                  f"l2=0, mask frozen ({total_active} active terms)")
+
+        try:
+            for epoch in range(refit_epochs):
+                model.train()
+
+                if batch_size is not None and batch_size < B:
+                    batch_idx = torch.randperm(B)[:batch_size]
+                    xb = xs_train[:, batch_idx]
+                    yb = ys_train[:, batch_idx]
+                else:
+                    xb, yb = xs_train, ys_train
+
+                ys_pred, _ = model(xb)
+
+                valid = ~torch.isnan(yb.sum(dim=-1))
+                mse_loss = F.mse_loss(ys_pred[valid], yb[valid])
+
+                refit_optimizer.zero_grad()
+                mse_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                refit_optimizer.step()
+
+                if verbose and (epoch % 50 == 0 or epoch == refit_epochs - 1):
+                    msg = f"Refit {epoch:4d} | mse {mse_loss.item():.6f}"
+                    if xs_test is not None and ys_test is not None:
+                        with torch.no_grad():
+                            model.eval()
+                            x_te = xs_test.unsqueeze(0).expand(E, -1, -1, -1)
+                            yp_te, _ = model(x_te)
+                            valid_te = ~torch.isnan(ys_test.sum(dim=-1))
+                            y_te_exp = ys_test.unsqueeze(0).expand(E, -1, -1, -1)
+                            loss_te = F.mse_loss(
+                                yp_te[:, valid_te], y_te_exp[:, valid_te]
+                            )
+                            msg += f" | test loss {loss_te.item():.6f}"
+                    print(msg)
+        except KeyboardInterrupt:
+            if verbose:
+                print(f"\nRefit interrupted at epoch {epoch}.")

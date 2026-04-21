@@ -5,17 +5,27 @@ import pytest
 from sindy_rnn import PolynomialRNN
 
 
-@pytest.mark.parametrize("n_states,n_controls,degree,ensemble_size", [
-    (2, 0, 2, 1),
-    (3, 0, 2, 5),
-    (2, 1, 2, 3),
-    (3, 2, 2, 4),
-    (2, 0, 3, 2),
-    (3, 1, 3, 3),
-    (1, 0, 2, 1),
-    (4, 0, 2, 2),
+@pytest.mark.parametrize("n_states,n_controls,degree,ensemble_size,decomposed", [
+    # Decomposed (new default)
+    (2, 0, 2, 1, True),
+    (3, 0, 2, 5, True),
+    (2, 1, 2, 3, True),
+    (3, 2, 2, 4, True),
+    (2, 0, 3, 2, True),
+    (3, 1, 3, 3, True),
+    (1, 0, 2, 1, True),
+    (4, 0, 2, 2, True),
+    # Coupled (original)
+    (2, 0, 2, 1, False),
+    (3, 0, 2, 5, False),
+    (2, 1, 2, 3, False),
+    (3, 2, 2, 4, False),
+    (2, 0, 3, 2, False),
+    (3, 1, 3, 3, False),
+    (1, 0, 2, 1, False),
+    (4, 0, 2, 2, False),
 ])
-def test_forward_equals_forward_polynomial(n_states, n_controls, degree, ensemble_size):
+def test_forward_equals_forward_polynomial(n_states, n_controls, degree, ensemble_size, decomposed):
     """CRITICAL INVARIANT: standard forward == polynomial forward with mask=ones.
 
     This is the single most important test in the codebase.
@@ -28,6 +38,7 @@ def test_forward_equals_forward_polynomial(n_states, n_controls, degree, ensembl
         ensemble_size=ensemble_size,
         polynomial_degree=degree,
         compiled_forward=False,
+        decomposed=decomposed,
     )
 
     E = ensemble_size
@@ -48,12 +59,15 @@ def test_forward_equals_forward_polynomial(n_states, n_controls, degree, ensembl
     torch.testing.assert_close(h_standard, h_poly, rtol=1e-4, atol=1e-5)
 
 
-@pytest.mark.parametrize("n_states,n_controls,degree", [
-    (2, 0, 2),
-    (3, 1, 2),
-    (2, 0, 3),
+@pytest.mark.parametrize("n_states,n_controls,degree,decomposed", [
+    (2, 0, 2, True),
+    (3, 1, 2, True),
+    (2, 0, 3, True),
+    (2, 0, 2, False),
+    (3, 1, 2, False),
+    (2, 0, 3, False),
 ])
-def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degree):
+def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degree, decomposed):
     """forward_polynomial with mask=None should equal mask=all_ones."""
     torch.manual_seed(123)
 
@@ -63,6 +77,7 @@ def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degre
         ensemble_size=3,
         polynomial_degree=degree,
         compiled_forward=False,
+        decomposed=decomposed,
     )
 
     E = 3

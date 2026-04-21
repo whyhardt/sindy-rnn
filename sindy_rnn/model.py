@@ -80,8 +80,84 @@ class EnsemblePolynomialLayer(nn.Module):
         return result
 
 
+class DecomposedPolynomialLayer(nn.Module):
+    """Degree-decomposed polynomial with independent parameterization per degree.
+
+    Each polynomial degree d has its own set of weight matrices:
+    - d=0: learnable bias (E, n_states)
+    - d=1: single weight matrix (E, n_states, n_features)
+    - d>=2: product of d bias-free linear forms, each (E, n_states, n_features)
+
+    This completely decouples coefficients across degrees. Bias-free products
+    produce ONLY degree-d monomials (no lower-degree leakage), eliminating
+    the algebraic constraints that arise when a single product-of-forms must
+    encode both linear and nonlinear terms through weight-bias interactions.
+    """
+
+    def __init__(self, ensemble_size: int, input_size: int, output_size: int,
+                 degree: int = 2, dropout: float = 0.):
+        super().__init__()
+        self.degree = degree
+        self.input_size = input_size
+        self.output_size = output_size
+        self.dropout = nn.Dropout(dropout)
+
+        # Degree 0: constant
+        self.constant_bias = nn.Parameter(torch.zeros(ensemble_size, output_size))
+
+        # Degree 1: linear map
+        self.linear_weight = nn.Parameter(
+            torch.empty(ensemble_size, output_size, input_size)
+        )
+        nn.init.xavier_normal_(self.linear_weight, gain=1.0)
+
+        # Degree d>=2: d independent weight matrices (bias-free linear forms)
+        self.higher_degree_weights = nn.ModuleDict()
+        for d in range(2, degree + 1):
+            weights = nn.ParameterList([
+                nn.Parameter(torch.empty(ensemble_size, output_size, input_size))
+                for _ in range(d)
+            ])
+            for w in weights:
+                nn.init.xavier_normal_(w, gain=1.0)
+            self.higher_degree_weights[str(d)] = weights
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Evaluate the decomposed polynomial.
+
+        Args:
+            x: (E, B, n_features)
+        Returns:
+            (E, B, n_states)
+        """
+        # Degree 0: constant
+        result = self.constant_bias.unsqueeze(1).expand(-1, x.shape[1], -1)
+
+        # Degree 1: linear
+        result = result + self.dropout(
+            torch.einsum('eni,ebi->ebn', self.linear_weight, x)
+        )
+
+        # Degree d>=2: product of d bias-free forms
+        for d_str, weights in self.higher_degree_weights.items():
+            d = int(d_str)
+            prod = self.dropout(
+                torch.einsum('eni,ebi->ebn', weights[0], x)
+            )
+            for k in range(1, d):
+                factor = self.dropout(
+                    torch.einsum('eni,ebi->ebn', weights[k], x)
+                )
+                prod = prod * factor
+            if d > 1:
+                prod = prod / (d ** 0.5)
+            result = result + prod
+
+        return result
+
+
 class EnsembleRNNModule(nn.Module):
-    """Gated recurrent cell built on EnsemblePolynomialLayer.
+    """Gated recurrent cell built on a polynomial layer.
 
     x_t    = concat(h[t], u[t])         # (E, B, n_features)
     c      = PolynomialLayer(x_t)       # (E, B, n_states)
@@ -97,6 +173,7 @@ class EnsembleRNNModule(nn.Module):
         feature_dropout: float = 0.,
         compiled_forward: bool = True,
         polynomial_degree: int = 2,
+        decomposed: bool = True,
     ):
         super().__init__()
         n_features = n_states + n_controls
@@ -104,22 +181,31 @@ class EnsembleRNNModule(nn.Module):
         self.n_states = n_states
         self.n_controls = n_controls
         self.ensemble_size = ensemble_size
+        self._decomposed = decomposed
 
-        self.projection = EnsemblePolynomialLayer(
-            ensemble_size=ensemble_size,
-            input_size=n_features,
-            output_size=n_states,
-            degree=polynomial_degree,
-            dropout=dropout,
-        )
+        if decomposed:
+            self.projection = DecomposedPolynomialLayer(
+                ensemble_size=ensemble_size,
+                input_size=n_features,
+                output_size=n_states,
+                degree=polynomial_degree,
+                dropout=dropout,
+            )
+        else:
+            self.projection = EnsemblePolynomialLayer(
+                ensemble_size=ensemble_size,
+                input_size=n_features,
+                output_size=n_states,
+                degree=polynomial_degree,
+                dropout=dropout,
+            )
 
         # Per-member damping: sigmoid(-3) ~ 0.047 -> nearly persistent state at init
         self.damping_coefficient = nn.Parameter(torch.full((ensemble_size,), -3.0))
         self.scale_candidate = False  # P(x) is not scaled by alpha
 
-        # self.dropout = nn.Dropout(p=dropout)
         self.feature_dropout_p = feature_dropout
-        
+
         # Precompute library structure over n_features
         lib = build_library_structure(n_features, polynomial_degree)
         self._library_terms = lib['terms']
@@ -200,38 +286,99 @@ class EnsembleRNNModule(nn.Module):
         Returns:
             theta: (E, n_states, n_terms) — polynomial coefficients in monomial basis
         """
+        if self._decomposed:
+            return self._unfold_decomposed()
+        return self._unfold_coupled()
+
+    def _unfold_coupled(self) -> Tensor:
+        """Unfold coupled (original) polynomial layer."""
         W_list = list(self.projection.weights)  # D x (E, n_states, n_features)
         b_list = list(self.projection.biases)   # D x (E, n_states)
         degree = self.projection.degree
         n_terms = self._n_library_terms
         E, n = W_list[0].shape[0], W_list[0].shape[1]
 
-        # Initialize with first linear form d=0
         coeffs = torch.zeros(E, n, n_terms,
                              device=W_list[0].device, dtype=W_list[0].dtype)
         coeffs[:, :, self._bias_index] = b_list[0]
         coeffs[:, :, self._linear_indices] = W_list[0]
 
-        # Recursively multiply by linear forms d=1 ... D-1
         for d in range(1, degree):
-            new_coeffs = coeffs * b_list[d].unsqueeze(-1)  # (E, n_states, n_terms)
+            new_coeffs = coeffs * b_list[d].unsqueeze(-1)
 
             for f in range(self._mult_table.shape[1]):
-                targets = self._mult_table[:, f]  # (n_terms,)
+                targets = self._mult_table[:, f]
                 valid = targets >= 0
                 src_idx = torch.where(valid)[0]
                 tgt_idx = targets[src_idx]
 
-                w_f = W_list[d][:, :, f].unsqueeze(-1)  # (E, n_states, 1)
+                w_f = W_list[d][:, :, f].unsqueeze(-1)
                 new_coeffs[:, :, tgt_idx] = (
                     new_coeffs[:, :, tgt_idx]
                     + coeffs[:, :, src_idx] * w_f
                 )
             coeffs = new_coeffs
 
-        # Degree normalisation
         if degree > 1:
             coeffs = coeffs / (degree ** 0.5)
+
+        return coeffs
+
+    def _unfold_decomposed(self) -> Tensor:
+        """Unfold decomposed polynomial layer into monomial coefficients.
+
+        Each degree component is unfolded independently:
+        - Degree 0: constant bias -> bias_index slot
+        - Degree 1: linear weight -> linear_indices slots
+        - Degree d>=2: recursive expansion of d bias-free forms -> degree-d slots only
+          (bias-free products produce no lower-degree leakage)
+        """
+        proj = self.projection
+        n_terms = self._n_library_terms
+        n_features = self._mult_table.shape[1]
+        E = proj.linear_weight.shape[0]
+        n = proj.linear_weight.shape[1]
+        device = proj.linear_weight.device
+        dtype = proj.linear_weight.dtype
+
+        coeffs = torch.zeros(E, n, n_terms, device=device, dtype=dtype)
+
+        # Degree 0: constant
+        coeffs[:, :, self._bias_index] = proj.constant_bias
+
+        # Degree 1: linear
+        coeffs[:, :, self._linear_indices] = proj.linear_weight
+
+        # Degree d>=2: product of d bias-free forms
+        for d_str, weights in proj.higher_degree_weights.items():
+            d = int(d_str)
+            W_list = list(weights)
+
+            # Initialize with first form's linear terms
+            d_coeffs = torch.zeros(E, n, n_terms, device=device, dtype=dtype)
+            d_coeffs[:, :, self._linear_indices] = W_list[0]
+
+            # Multiply by remaining bias-free forms (bias=0 -> no lower-degree leakage)
+            for k in range(1, d):
+                new_d_coeffs = torch.zeros_like(d_coeffs)
+                for f in range(n_features):
+                    targets = self._mult_table[:, f]
+                    valid = targets >= 0
+                    src_idx = torch.where(valid)[0]
+                    tgt_idx = targets[src_idx]
+
+                    w_f = W_list[k][:, :, f].unsqueeze(-1)
+                    new_d_coeffs[:, :, tgt_idx] = (
+                        new_d_coeffs[:, :, tgt_idx]
+                        + d_coeffs[:, :, src_idx] * w_f
+                    )
+                d_coeffs = new_d_coeffs
+
+            # Degree normalization
+            if d > 1:
+                d_coeffs = d_coeffs / (d ** 0.5)
+
+            coeffs = coeffs + d_coeffs
 
         return coeffs
 
@@ -281,6 +428,7 @@ class PolynomialRNN(nn.Module):
         feature_dropout: float = 0.,
         compiled_forward: bool = False,
         initial_state: Union[float, Tensor] = 0.,
+        decomposed: bool = True,
     ):
         super().__init__()
         self.n_states = n_states
@@ -296,6 +444,7 @@ class PolynomialRNN(nn.Module):
             feature_dropout=feature_dropout,
             compiled_forward=compiled_forward,
             polynomial_degree=polynomial_degree,
+            decomposed=decomposed,
         )
 
         n_library_terms = self.rnn._n_library_terms
@@ -396,6 +545,7 @@ class PolynomialRNN(nn.Module):
                 'polynomial_degree': self.rnn.projection.degree,
                 'state_names': self.state_names,
                 'control_names': self.control_names,
+                'decomposed': self.rnn._decomposed,
             }
         }, path)
 
@@ -404,6 +554,9 @@ class PolynomialRNN(nn.Module):
         """Load saved model. kwargs override saved config."""
         checkpoint = torch.load(path, weights_only=False)
         config = {**checkpoint['config'], **kwargs}
+        # Backward compat: old checkpoints don't have 'decomposed'
+        if 'decomposed' not in config:
+            config['decomposed'] = False
         model = cls(**config)
         model.load_state_dict(checkpoint['state_dict'])
         model.coefficient_masks.copy_(checkpoint['coefficient_masks'])
