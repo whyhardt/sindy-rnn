@@ -24,6 +24,27 @@ from sindy_rnn import PolynomialRNN, fit
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+# ---- Hyperparameters ----
+CONFIG = {
+    'dt': 0.01,
+    'n_steps': 10000,
+    'ensemble_size': 11,
+    'degree': 2,
+    'epochs': 10000,
+    'warmup_steps': 200,
+    'window_size': 100,
+    'learning_rate': 1e-2,
+    'l1': 1e-4,
+    'pruning_frequency': 100,
+    'pruning_threshold': 0.1,
+    'ensemble_pruning_alpha': 0.05,
+    'feature_dropout': 0.,
+    'dropout': 0.1,
+    'direct': False,
+    'refit_epochs': 100,
+    'noise_fractions': [0.],#, 0.01, 0.02, 0.05, 0.1],
+}
+
 
 def lorenz_rk4(x, dt=0.01, sigma=10.0, rho=28.0, beta=8.0/3.0):
     """4th-order Runge-Kutta integrator for the Lorenz system."""
@@ -107,12 +128,13 @@ def run_experiment(noise_std, trajectory_clean, config, seed=42):
         n_controls=0,
         polynomial_degree=config['degree'],
         ensemble_size=config['ensemble_size'],
+        dt=config['dt'],
         state_names=['x', 'y', 'z'],
         dropout=config['dropout'],
         feature_dropout=config['feature_dropout'],
         compiled_forward=False,
         direct=config.get('direct', False),
-        decomposed=False,
+        decomposed=True,
     ).to(DEVICE)
 
     fit(model, xs, ys,
@@ -125,7 +147,7 @@ def run_experiment(noise_std, trajectory_clean, config, seed=42):
         pruning_frequency=config['pruning_frequency'],
         pruning_method='median',
         learning_rate=config['learning_rate'],
-        l2=config['l2'],
+        l2=config['l1'],
         dt=config['dt'],
         refit_epochs=config.get('refit_epochs', 0),
         verbose=True,
@@ -151,10 +173,8 @@ def print_results(model, noise_std, test_mse, dt=0.01):
     print(f"\n{'='*60}")
     print(f"Noise std = {noise_std:.4f} | Test MSE = {test_mse:.6f} | Active terms = {total_active}")
     print(f"{'='*60}")
-    print("\nDiscrete-time equations:")
+    print("\nDiscovered ODE:")
     model.print_equations()
-    print(f"\nContinuous-time ODE (dt={dt}):")
-    print(model.get_continuous_equations(dt))
     print(f"\nActive terms per state: {active}")
 
 
@@ -163,30 +183,9 @@ def main():
     print("=" * 60)
     print(f"Device: {DEVICE}")
 
-    # ---- Hyperparameters ----
-    config = {
-        'dt': 0.01,
-        'n_steps': 10000,
-        'ensemble_size': 11,
-        'degree': 2,
-        'epochs': 1000,
-        'warmup_steps': 500,
-        'window_size': 100,
-        'learning_rate': 1e-2,
-        'l2': 5e-2,
-        'pruning_frequency': 20,
-        'pruning_threshold': 0.5,
-        'ensemble_pruning_alpha': 0.05,
-        'feature_dropout': 0.,
-        'dropout': 0.1,
-        'direct': False,
-        'refit_epochs': 200,
-        'noise_fractions': [0., 0.01, 0.02, 0.05, 0.1],
-    }
-
-    print(f"\nSettings: {config}")
+    print(f"\nSettings: {CONFIG}")
     print("\nGenerating clean Lorenz trajectory...")
-    trajectory_clean = generate_lorenz_data(n_steps=config['n_steps'], dt=config['dt'], seed=42)
+    trajectory_clean = generate_lorenz_data(n_steps=CONFIG['n_steps'], dt=CONFIG['dt'], seed=42)
 
     scale = np.std(trajectory_clean, axis=0).mean()
     print(f"Average state std: {scale:.2f}")
@@ -199,7 +198,7 @@ def main():
     results = []
     
     # Step 1: First recover clean system to validate approach
-    if 0 in config['noise_fractions']:
+    if 0 in CONFIG['noise_fractions']:
         print(f"\n\n{'#'*60}")
         print("# Step 1: Clean data recovery (noise = 0)")
         print(f"{'#'*60}")
@@ -207,10 +206,10 @@ def main():
         model_clean, mse_clean = run_experiment(
             noise_std=0.0,
             trajectory_clean=trajectory_clean,
-            config=config,
+            config=CONFIG,
             seed=42,
         )
-        print_results(model_clean, 0.0, mse_clean, dt=config['dt'])
+        print_results(model_clean, 0.0, mse_clean, dt=CONFIG['dt'])
 
         active_clean = model_clean.count_active_terms()
         total_clean = sum(active_clean.values())
@@ -223,10 +222,10 @@ def main():
                 'total_active': total_clean, 'active_per_state': active_clean})
         
     # Step 2: Sweep noise levels
-    if 0 in config['noise_fractions']:
-        noise_fractions = config['noise_fractions'][1:]
+    if 0 in CONFIG['noise_fractions']:
+        noise_fractions = CONFIG['noise_fractions'][1:]
     else:
-        noise_fractions = config['noise_fractions']
+        noise_fractions = CONFIG['noise_fractions']
     noise_levels = [f * scale for f in noise_fractions]
     
     print(f"\n\nNoise levels (fraction of state std): {noise_fractions}")
@@ -234,17 +233,17 @@ def main():
 
     for i, (frac, noise_std) in enumerate(zip(noise_fractions, noise_levels)):
         print(f"\n\n{'#'*60}")
-        print(f"# Experiment {i+2 if 0 in config['noise_fractions'] else i+1}/{len(noise_levels)}: noise = {frac:.0%} of state std ({noise_std:.3f})")
+        print(f"# Experiment {i+2 if 0 in CONFIG['noise_fractions'] else i+1}/{len(noise_levels)}: noise = {frac:.0%} of state std ({noise_std:.3f})")
         print(f"{'#'*60}")
 
         model, test_mse = run_experiment(
             noise_std=noise_std,
             trajectory_clean=trajectory_clean,
-            config=config,
+            config=CONFIG,
             seed=42,
         )
 
-        print_results(model, noise_std, test_mse, dt=config['dt'])
+        print_results(model, noise_std, test_mse, dt=CONFIG['dt'])
         active = model.count_active_terms()
         results.append({
             'noise_frac': frac,

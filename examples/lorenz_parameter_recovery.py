@@ -164,6 +164,7 @@ def run_sindy_rnn(trajectory_noisy, trajectory_test, config, direct=False, seed=
         n_states=3, n_controls=0,
         polynomial_degree=config['degree'],
         ensemble_size=config['ensemble_size'],
+        dt=DT,
         state_names=['x', 'y', 'z'],
         dropout=config['dropout'],
         feature_dropout=config['feature_dropout'],
@@ -187,16 +188,11 @@ def run_sindy_rnn(trajectory_noisy, trajectory_test, config, direct=False, seed=
         verbose=False,
     )
 
-    # Extract continuous-time coefficients
+    # Extract ODE coefficients (Euler parameterization: theta IS the ODE)
     coefs = model.get_coefficients(aggregate=True)
     coef_matrix = np.zeros((3, model.rnn._n_library_terms))
     for i, name in enumerate(model.state_names):
-        c_disc = coefs[name].cpu().numpy()
-        # Convert to continuous time
-        c_cont = c_disc / DT
-        self_idx = model.rnn._linear_indices[i].item()
-        c_cont[self_idx] = (c_disc[self_idx] - 1.0) / DT
-        coef_matrix[i] = c_cont
+        coef_matrix[i] = coefs[name].cpu().numpy()
 
     # Test MSE on clean data
     with torch.no_grad():

@@ -37,6 +37,7 @@ def test_forward_equals_forward_polynomial(n_states, n_controls, degree, ensembl
         n_controls=n_controls,
         ensemble_size=ensemble_size,
         polynomial_degree=degree,
+        dt=0.1,
         compiled_forward=False,
         decomposed=decomposed,
     )
@@ -76,6 +77,7 @@ def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degre
         n_controls=n_controls,
         ensemble_size=3,
         polynomial_degree=degree,
+        dt=0.1,
         compiled_forward=False,
         decomposed=decomposed,
     )
@@ -92,13 +94,17 @@ def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degre
     torch.testing.assert_close(h_no_mask, h_with_mask, rtol=1e-5, atol=1e-6)
 
 
-def test_masking_removes_learned_contribution_keeps_decay():
-    """Masking h_i coefficient to zero removes learned contribution but not (1-alpha) decay."""
+def test_masking_removes_polynomial_keeps_identity():
+    """Masking ALL polynomial terms gives h[t+1] = h[t] (identity, no decay).
+
+    With Euler parameterization, masking all terms zeros P(h), so
+    h[t+1] = h[t] + dt * 0 = h[t].
+    """
     torch.manual_seed(99)
 
     model = PolynomialRNN(
         n_states=2, n_controls=0, ensemble_size=1,
-        polynomial_degree=2, compiled_forward=False,
+        polynomial_degree=2, dt=0.1, compiled_forward=False,
     )
 
     E, B = 1, 3
@@ -110,11 +116,8 @@ def test_masking_removes_learned_contribution_keeps_decay():
 
     h_next = model.rnn.forward_polynomial(h, None, mask=mask)
 
-    # For dimension 0, the result should be (1-alpha) * h[:, :, 0]
-    alpha = torch.sigmoid(model.rnn.damping_coefficient).item()
-    expected_dim0 = (1 - alpha) * h[:, :, 0]
-
-    torch.testing.assert_close(h_next[:, :, 0], expected_dim0, rtol=1e-5, atol=1e-6)
+    # For dimension 0, the result should be h[:, :, 0] (identity)
+    torch.testing.assert_close(h_next[:, :, 0], h[:, :, 0], rtol=1e-5, atol=1e-6)
 
 
 def test_sequence_forward_shape():
@@ -131,3 +134,30 @@ def test_sequence_forward_shape():
 
     assert preds.shape == (5, B, T, 3)
     assert final_h.shape == (5, B, 3)
+
+
+@pytest.mark.parametrize("dt", [0.01, 0.1, 1.0])
+def test_dt_scaling(dt):
+    """Verify that dt scales the polynomial output correctly."""
+    torch.manual_seed(42)
+
+    model = PolynomialRNN(
+        n_states=2, n_controls=0, ensemble_size=1,
+        polynomial_degree=2, dt=dt, compiled_forward=False,
+    )
+
+    E, B = 1, 3
+    h = torch.randn(E, B, 2)
+
+    h_next = model.rnn._forward_impl(h, None)
+
+    # Compute expected: h + dt * P(h)
+    if model.rnn._direct:
+        x_t = h
+        library = model.rnn._compute_library(x_t)
+        P_h = torch.einsum('ebt,ent->ebn', library, model.rnn.theta)
+    else:
+        P_h = model.rnn.projection(h)
+    expected = h + dt * P_h
+
+    torch.testing.assert_close(h_next, expected, rtol=1e-5, atol=1e-6)

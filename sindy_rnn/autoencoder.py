@@ -4,7 +4,7 @@ Wraps PolynomialRNN with encoder/decoder to learn latent dynamics
 from sparse measurements via teacher-forced next-state prediction:
 
     z_t = encoder(sparse_obs_t)                         # encode current sensors to latent
-    z_{t+1} = (1-α) * z_t + P(z_t)                     # polynomial dynamics in latent space
+    z_{t+1} = z_t + dt * P(z_t)                         # forward Euler step (P ≈ dz/dt)
     full_pred_{t+1} = decoder(z_{t+1})                  # decode predicted next state
 
 Two encoder types:
@@ -15,13 +15,13 @@ Two encoder types:
 Teacher forcing: at each training step, z_t comes from encoding the ACTUAL
 sensors (not the model's own prediction). The polynomial P(z) operates
 autonomously on the latent state — no sensor terms in the polynomial library.
-The discovered equations are dz/dt = f(z) only.
+The discovered equations are dz/dt = P(z) only.
 
 At forecast time, the encoder provides z_0 from the last observation,
 then the polynomial evolves z forward without any sensor input:
     z_0 = encoder(sensors_0)
-    z_1 = (1-α) * z_0 + P(z_0)
-    z_2 = (1-α) * z_1 + P(z_1)
+    z_1 = z_0 + dt * P(z_0)
+    z_2 = z_1 + dt * P(z_1)
     ...
 """
 
@@ -193,15 +193,15 @@ class MLPDecoder(nn.Module):
 class SparseAutoencoderRNN(nn.Module):
     """Encoder-decoder wrapper around PolynomialRNN for sparse observation settings.
 
-    Architecture (teacher-forced next-state prediction):
+    Architecture (teacher-forced next-state prediction with forward Euler):
         z_t = encoder(sparse_obs_t)                          # encode sensors to latent
-        z_{t+1} = (1-α) * z_t + P(z_t [, u_t])             # polynomial dynamics
+        z_{t+1} = z_t + dt * P(z_t [, u_t])                 # forward Euler (P ≈ dz/dt)
         full_pred_{t+1} = decoder(z_{t+1})                   # decode to full state
 
     The encoder maps sparse sensors to latent coordinates at each timestep.
-    The polynomial RNN predicts the next latent state. The decoder maps back
-    to full state. Teacher forcing: z_t always comes from encoding actual
-    sensors, not from the model's own predictions.
+    The polynomial RNN predicts the next latent state via forward Euler.
+    The decoder maps back to full state. Teacher forcing: z_t always comes
+    from encoding actual sensors, not from the model's own predictions.
 
     Two encoder types:
       - 'mlp': Per-timestep MLP, no temporal context
@@ -209,7 +209,8 @@ class SparseAutoencoderRNN(nn.Module):
         providing better state estimation from sparse measurements
 
     The polynomial P operates only on the latent state z (and optional external
-    controls u). The discovered equations are dz/dt = f(z) — no sensor terms.
+    controls u) and directly represents the ODE dz/dt = P(z). The small dt
+    provides implicit stability bias for autonomous forecasting.
 
     The encoder and decoder are shared across ensemble members. Only the inner
     PolynomialRNN has E independent members. Pruning and equation extraction
@@ -222,6 +223,7 @@ class SparseAutoencoderRNN(nn.Module):
         n_controls: number of external control inputs
         ensemble_size: number of independent ensemble members
         polynomial_degree: degree for PolynomialRNN
+        dt: timestep for forward Euler integration
         encoder_type: 'mlp' or 'gru'
         encoder_hidden_dims: MLP encoder hidden widths ([] for single linear layer)
         encoder_gru_hidden_dim: GRU hidden dimension (default: latent_dim)
@@ -244,6 +246,7 @@ class SparseAutoencoderRNN(nn.Module):
         n_controls: int = 0,
         ensemble_size: int = 1,
         polynomial_degree: int = 2,
+        dt: float = 1.0,
         encoder_type: str = 'mlp',
         encoder_hidden_dims: Optional[List[int]] = None,
         encoder_gru_hidden_dim: Optional[int] = None,
@@ -285,6 +288,7 @@ class SparseAutoencoderRNN(nn.Module):
             n_controls=n_controls,
             ensemble_size=ensemble_size,
             polynomial_degree=polynomial_degree,
+            dt=dt,
             state_names=state_names,
             control_names=ext_control_names,
             dropout=dynamics_dropout,
@@ -385,7 +389,7 @@ class SparseAutoencoderRNN(nn.Module):
     def get_equations(self) -> str:
         return self.dynamics.get_equations()
 
-    def get_continuous_equations(self, dt: float) -> str:
+    def get_continuous_equations(self, dt: float = None) -> str:
         return self.dynamics.get_continuous_equations(dt)
 
     def get_coefficients(self, aggregate=True) -> Dict[str, Tensor]:
@@ -406,6 +410,7 @@ class SparseAutoencoderRNN(nn.Module):
             'n_controls': self._n_external_controls,
             'ensemble_size': self.dynamics.ensemble_size,
             'polynomial_degree': self.dynamics.rnn._degree,
+            'dt': self.dynamics.rnn._dt.item(),
             'state_names': self.dynamics.state_names,
             'decomposed': self.dynamics.rnn._decomposed,
             'direct': self.dynamics.rnn._direct,
@@ -429,8 +434,10 @@ class SparseAutoencoderRNN(nn.Module):
         # Backward compat
         if 'direct' not in config:
             config['direct'] = False
+        if 'dt' not in config:
+            config['dt'] = 1.0
         model = cls(**config)
-        model.load_state_dict(checkpoint['state_dict'])
+        model.load_state_dict(checkpoint['state_dict'], strict=False)
         model.dynamics.coefficient_masks.copy_(checkpoint['coefficient_masks'])
         model.dynamics.pruning_patience.copy_(checkpoint['pruning_patience'])
         return model

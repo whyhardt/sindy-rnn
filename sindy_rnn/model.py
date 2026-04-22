@@ -157,11 +157,12 @@ class DecomposedPolynomialLayer(nn.Module):
 
 
 class EnsembleRNNModule(nn.Module):
-    """Gated recurrent cell built on a polynomial layer.
+    """Forward Euler recurrent cell built on a polynomial layer.
 
-    x_t    = concat(h[t], u[t])         # (E, B, n_features)
-    c      = PolynomialLayer(x_t)       # (E, B, n_states)
-    h[t+1] = (1 - alpha) * h[t] + alpha_n * c
+    The polynomial P represents the ODE right-hand side dh/dt = P(h, u):
+        x_t    = concat(h[t], u[t])         # (E, B, n_features)
+        c      = PolynomialLayer(x_t)       # (E, B, n_states)  — P(h, u) ≈ dh/dt
+        h[t+1] = h[t] + dt * c              # forward Euler step
     """
 
     def __init__(
@@ -169,6 +170,7 @@ class EnsembleRNNModule(nn.Module):
         ensemble_size: int,
         n_states: int,
         n_controls: int = 0,
+        dt: float = 1.0,
         dropout: float = 0.,
         feature_dropout: float = 0.,
         compiled_forward: bool = True,
@@ -185,6 +187,9 @@ class EnsembleRNNModule(nn.Module):
         self._decomposed = decomposed
         self._direct = direct
         self._degree = polynomial_degree
+
+        # Timestep for forward Euler integration
+        self.register_buffer('_dt', torch.tensor(float(dt)))
 
         # Precompute library structure over n_features (needed before direct theta init)
         lib = build_library_structure(n_features, polynomial_degree)
@@ -219,10 +224,6 @@ class EnsembleRNNModule(nn.Module):
                 dropout=dropout,
             )
 
-        # Per-member damping: sigmoid(-3) ~ 0.047 -> nearly persistent state at init
-        self.damping_coefficient = nn.Parameter(torch.full((ensemble_size,), -3.0))
-        self.scale_candidate = False  # P(x) is not scaled by alpha
-
         self.feature_dropout_p = feature_dropout
 
         self._compiled_forward = None
@@ -233,16 +234,14 @@ class EnsembleRNNModule(nn.Module):
                 self._compiled_forward = None
 
     def _forward_impl(self, h, u=None):
-        """Core forward implementation."""
+        """Core forward implementation: h[t+1] = h[t] + dt * P(h[t], u[t])."""
         x_t = torch.cat([h, u], dim=-1) if u is not None else h
         if self._direct:
             library = self._compute_library(x_t)
             c = torch.einsum('ebt,ent->ebn', library, self.theta)
         else:
             c = self.projection(x_t)
-        alpha = torch.sigmoid(self.damping_coefficient).view(-1, 1, 1)  # (E, 1, 1)
-        alpha_n = alpha if self.scale_candidate else 1.0
-        return (1 - alpha) * h + alpha_n * c
+        return h + self._dt * c
 
     def forward(self, h, u=None):
         """Standard forward pass (training — gradients flow through polynomial layer).
@@ -260,9 +259,11 @@ class EnsembleRNNModule(nn.Module):
     def forward_polynomial(self, h, u=None, mask=None, theta=None):
         """Compute next hidden state via the explicit polynomial representation.
 
-        Mask is applied to raw unfolded coefficients theta BEFORE the (1-alpha)
-        self-term is added. The (1-alpha) contribution is then added unconditionally
-        by the gated update.
+        Uses forward Euler: h[t+1] = h[t] + dt * P(h[t], u[t])
+        where P is the polynomial with coefficients theta (representing dh/dt).
+
+        Mask is applied to theta before computing the polynomial output.
+        The identity h[t] is always present (architectural, not subject to masking).
 
         Args:
             h: (E, B, n_states) — current hidden state
@@ -289,9 +290,7 @@ class EnsembleRNNModule(nn.Module):
         library = self._compute_library(x_t)  # (E, B, n_terms)
         n = torch.einsum('ebt,ent->ebn', library, theta)  # (E, B, n_states)
 
-        alpha = torch.sigmoid(self.damping_coefficient).view(-1, 1, 1)  # (E, 1, 1)
-        alpha_n = alpha if self.scale_candidate else 1.0
-        return (1 - alpha) * h + alpha_n * n
+        return h + self._dt * n
 
     def unfold_polynomial_coefficients(self) -> Tensor:
         """Return polynomial coefficients in monomial basis.
@@ -440,6 +439,7 @@ class PolynomialRNN(nn.Module):
         n_controls: int = 0,
         ensemble_size: int = 1,
         polynomial_degree: int = 2,
+        dt: float = 1.0,
         state_names: Optional[List[str]] = None,
         control_names: Optional[List[str]] = None,
         dropout: float = 0.,
@@ -459,6 +459,7 @@ class PolynomialRNN(nn.Module):
             ensemble_size=ensemble_size,
             n_states=n_states,
             n_controls=n_controls,
+            dt=dt,
             dropout=dropout,
             feature_dropout=feature_dropout,
             compiled_forward=compiled_forward,
@@ -531,10 +532,15 @@ class PolynomialRNN(nn.Module):
         from .equations import get_equations
         return get_equations(self)
 
-    def get_continuous_equations(self, dt: float) -> str:
-        """Return continuous-time ODE form of discovered equations."""
+    def get_continuous_equations(self, dt: float = None) -> str:
+        """Return continuous-time ODE form of discovered equations.
+
+        With Euler parameterization, theta directly represents the ODE.
+        The dt argument is kept for backward compatibility but is ignored
+        (model's stored dt is used).
+        """
         from .equations import get_continuous_equations
-        return get_continuous_equations(self, dt)
+        return get_continuous_equations(self)
 
     def get_coefficients(self, aggregate=True) -> Dict[str, Tensor]:
         """Return effective polynomial coefficients per state dimension."""
@@ -563,6 +569,7 @@ class PolynomialRNN(nn.Module):
                 'n_controls': self.rnn.n_controls,
                 'ensemble_size': self.ensemble_size,
                 'polynomial_degree': self.rnn._degree,
+                'dt': self.rnn._dt.item(),
                 'state_names': self.state_names,
                 'control_names': self.control_names,
                 'decomposed': self.rnn._decomposed,
@@ -580,8 +587,10 @@ class PolynomialRNN(nn.Module):
             config['decomposed'] = False
         if 'direct' not in config:
             config['direct'] = False
+        if 'dt' not in config:
+            config['dt'] = 1.0
         model = cls(**config)
-        model.load_state_dict(checkpoint['state_dict'])
+        model.load_state_dict(checkpoint['state_dict'], strict=False)
         model.coefficient_masks.copy_(checkpoint['coefficient_masks'])
         model.pruning_patience.copy_(checkpoint['pruning_patience'])
         return model

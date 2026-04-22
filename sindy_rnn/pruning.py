@@ -1,4 +1,8 @@
-"""Pruning system: ensemble CI test, patience mechanism, and threshold fallback."""
+"""Pruning system: ensemble CI test, patience mechanism, and threshold fallback.
+
+With Euler parameterization, theta directly represents ODE coefficients.
+No gate absorption or discrete-to-continuous conversion is needed.
+"""
 
 import torch
 from torch import Tensor
@@ -19,7 +23,7 @@ def minimum_effect_ci_test(
     penalising terms that only a few ensemble members identified.
 
     Args:
-        coefficients: (E, n_states, n_terms) — effective coefficients
+        coefficients: (E, n_states, n_terms) — ODE coefficients
         presence: (E, n_states, n_terms) — bool mask (which members have term)
         alpha: significance level (two-sided)
         delta: minimum effect size threshold
@@ -59,7 +63,7 @@ def median_effect_test(
     to a minority of members finding an alternative parameterization.
 
     Args:
-        coefficients: (E, n_states, n_terms) — effective coefficients
+        coefficients: (E, n_states, n_terms) — ODE coefficients
         presence: (E, n_states, n_terms) — bool mask (which members have term)
         delta: minimum effect size threshold
 
@@ -67,7 +71,6 @@ def median_effect_test(
         significant: (n_states, n_terms) bool — True where term survives
     """
     effective = (coefficients * presence.float()).detach()  # (E, n_states, n_terms)
-    E = effective.shape[0]
 
     median = effective.median(dim=0).values  # (n_states, n_terms)
 
@@ -81,30 +84,13 @@ def median_effect_test(
 
 
 def _get_effective_coefficients_raw(model) -> Tensor:
-    """Compute effective coefficients (gate-absorbed + self-term)."""
-    theta = model.rnn.unfold_polynomial_coefficients().detach()  # (E, n_states, n_terms)
-    gate = torch.sigmoid(model.rnn.damping_coefficient).detach()  # (E,)
-    alpha_n = gate.view(-1, 1, 1) if model.rnn.scale_candidate else 1.0
+    """Return raw ODE coefficients (masked).
 
-    theta_eff = theta * alpha_n
-    for i in range(model.n_states):
-        self_idx = model.rnn._linear_indices[i].item()
-        theta_eff[:, i, self_idx] = theta_eff[:, i, self_idx] + (1 - gate)  # broadcast (E,)
-
-    return theta_eff
-
-
-def _to_continuous(theta_eff: Tensor, model, dt: float) -> Tensor:
-    """Convert discrete effective coefficients to continuous-time scale.
-
-    Non-self terms: c / dt
-    Self-term (dim i): (c - 1) / dt
+    With Euler parameterization, theta directly represents dh/dt = P(h).
+    No gate absorption or self-term correction needed.
     """
-    theta_cont = theta_eff / dt
-    for i in range(model.n_states):
-        self_idx = model.rnn._linear_indices[i].item()
-        theta_cont[:, i, self_idx] = (theta_eff[:, i, self_idx] - 1.0) / dt
-    return theta_cont
+    theta = model.rnn.unfold_polynomial_coefficients().detach()  # (E, n_states, n_terms)
+    return theta
 
 
 def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
@@ -113,23 +99,22 @@ def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
 
     Args:
         model: PolynomialRNN instance
-        alpha: significance level for CI test, or min_fraction for median test
-        delta: minimum effect size threshold
-        dt: timestep (converts to continuous-time coefficients when provided)
+        alpha: significance level for CI test, or unused for median test
+        delta: minimum effect size threshold (in ODE units)
+        dt: unused (kept for backward compat). Theta is already in ODE units.
         method: 'ci' for mean-based confidence interval test,
-                'median' for median + sign-agreement test (robust to bifurcation)
+                'median' for median test (robust to bifurcation)
     """
-    theta_eff = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
-    coefs_for_test = _to_continuous(theta_eff, model, dt) if dt else theta_eff
+    theta = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
     mask = model.coefficient_masks  # (E, n_states, n_terms)
 
     if method == 'median':
         significant = median_effect_test(
-            coefs_for_test, mask, delta=delta
+            theta, mask, delta=delta
         )
     else:
         significant = minimum_effect_ci_test(
-            coefs_for_test, mask, alpha=alpha, delta=delta
+            theta, mask, alpha=alpha, delta=delta
         )  # (n_states, n_terms)
 
     still_active = mask.any(dim=0)  # (n_states, n_terms)
@@ -150,14 +135,13 @@ def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
 
 
 def threshold_patience_update(model, threshold: float, dt: float = None):
-    """Increment patience for terms with |effective_coef| < threshold.
+    """Increment patience for terms with |coefficient| < threshold.
 
-    If dt is provided, coefficients are converted to continuous-time scale
-    before comparison. Threshold is then in ODE units.
+    Threshold is in ODE units (theta directly represents dh/dt).
+    dt parameter is unused (kept for backward compat).
     """
-    theta_eff = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
-    coefs_for_test = _to_continuous(theta_eff, model, dt) if dt else theta_eff
-    below = (coefs_for_test.abs() < threshold) & model.coefficient_masks
+    theta = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
+    below = (theta.abs() < threshold) & model.coefficient_masks
     model.pruning_patience = torch.where(
         below,
         model.pruning_patience + 1,

@@ -6,7 +6,11 @@ from sindy_rnn import PolynomialRNN, fit
 
 
 def test_linear_system_recovery():
-    """Known x[t+1] = 0.9*x + 0.1*u -> verify coefficients recovered."""
+    """Known x[t+1] = 0.9*x + 0.1*u -> verify ODE coefficients recovered.
+
+    With Euler (dt=1): x[t+1] = x + P(x,u), so P(x,u) = -0.1*x + 0.1*u.
+    get_coefficients returns ODE coefficients (raw theta).
+    """
     torch.manual_seed(42)
 
     # Generate data from x[t+1] = 0.9*x[t] + 0.1*u[t]
@@ -25,6 +29,7 @@ def test_linear_system_recovery():
         n_controls=1,
         ensemble_size=1,
         polynomial_degree=2,
+        dt=1.0,
         state_names=['x'],
         control_names=['u'],
         compiled_forward=False,
@@ -33,28 +38,26 @@ def test_linear_system_recovery():
     fit(model, xs, ys,
         epochs=300,
         warmup_steps=100,
-        pruning_threshold=0.01,
+        pruning_threshold=0.005,
         learning_rate=1e-2,
         l2=1e-5,
         verbose=False,
     )
 
-    # Check coefficients
+    # Check ODE coefficients
     coefs = model.get_coefficients(aggregate=True)
     c = coefs['x']  # (n_terms,)
     # Terms: ['1', 'x', 'u', 'x^2', 'x*u', 'u^2']
-    # Expected: self-term (x) ~ 0.9, u ~ 0.1, rest ~ 0
+    # Expected ODE: dx/dt = -0.1*x + 0.1*u (since x[t+1] = x + dt*(-0.1x + 0.1u))
 
-    # The self-term includes (1-alpha) + alpha_n * theta_raw
-    # After training, the effective coefficient for 'x' should be ~0.9
     x_idx = model.rnn._linear_indices[0].item()  # index of x
     u_idx = model.rnn._linear_indices[1].item()  # index of u
 
     x_coef = c[x_idx].item()
     u_coef = c[u_idx].item()
 
-    assert abs(x_coef - 0.9) < 0.1, f"x coefficient {x_coef} not close to 0.9"
-    assert abs(u_coef - 0.1) < 0.1, f"u coefficient {u_coef} not close to 0.1"
+    assert abs(x_coef - (-0.1)) < 0.1, f"x ODE coefficient {x_coef} not close to -0.1"
+    assert abs(u_coef - 0.1) < 0.1, f"u ODE coefficient {u_coef} not close to 0.1"
 
     # Quadratic terms should be near zero or pruned
     for j in range(len(model.library_terms)):
@@ -77,7 +80,7 @@ def test_sparsity_on_linear_system():
 
     model = PolynomialRNN(
         n_states=1, n_controls=1, ensemble_size=5,
-        polynomial_degree=2, compiled_forward=False,
+        polynomial_degree=2, dt=1.0, compiled_forward=False,
         state_names=['x'], control_names=['u'],
     )
 
@@ -85,7 +88,7 @@ def test_sparsity_on_linear_system():
         epochs=400,
         warmup_steps=100,
         ensemble_pruning_alpha=0.05,
-        pruning_threshold=0.01,
+        pruning_threshold=0.005,
         learning_rate=1e-2,
         l2=1e-4,
         verbose=False,

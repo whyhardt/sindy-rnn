@@ -100,17 +100,15 @@ def test_pruning_fires_at_patience_2():
         ensemble_prune(model, alpha=0.05, delta=0.01)
 
     # Not pruned yet (patience = 1)
-    # Self-term might survive due to (1-alpha) contribution
-    n_terms = model.rnn._n_library_terms
-    self_idx = model.rnn._linear_indices[0].item()
+    assert model.coefficient_masks.all()
 
     # Second pruning step - patience goes to 2, pruning fires
     with torch.no_grad():
         ensemble_prune(model, alpha=0.05, delta=0.01)
 
-    # Some terms should now be pruned (except possibly self-term due to (1-alpha))
-    # The self-term has (1-alpha) ~ 0.95 added, so it should survive
-    assert model.coefficient_masks[:, 0, self_idx].all()
+    # With Euler (no gate), zeroed weights give theta=0 everywhere.
+    # ALL terms should be pruned (including self-term — no (1-alpha) boost).
+    assert not model.coefficient_masks.any()
 
 
 def test_pruning_fires_at_patience_2_decomposed():
@@ -143,9 +141,9 @@ def test_pruning_fires_at_patience_2_decomposed():
     with torch.no_grad():
         ensemble_prune(model, alpha=0.05, delta=0.01)
 
-    # Self-term should survive due to (1-alpha) ~ 0.95
-    self_idx = model.rnn._linear_indices[0].item()
-    assert model.coefficient_masks[:, 0, self_idx].all()
+    # With Euler (no gate), zeroed weights give theta=0 everywhere.
+    # ALL terms should be pruned.
+    assert not model.coefficient_masks.any()
 
 
 def test_threshold_pruning_single_ensemble():
@@ -172,7 +170,35 @@ def test_threshold_pruning_single_ensemble():
         threshold_patience_update(model, threshold=0.5)
         threshold_prune(model, patience_limit=2)
 
-    # Most terms should be pruned (except self-terms which get (1-alpha) boost)
-    for i in range(model.n_states):
-        self_idx = model.rnn._linear_indices[i].item()
-        assert model.coefficient_masks[0, i, self_idx].item()
+    # With Euler (no gate), tiny weights give tiny ODE coefficients.
+    # All terms should be pruned (no (1-alpha) boost on self-term).
+    assert not model.coefficient_masks.any()
+
+
+def test_pruning_preserves_significant_terms():
+    """Terms with large coefficients should survive pruning."""
+    torch.manual_seed(42)
+
+    model = PolynomialRNN(
+        n_states=1, n_controls=0, ensemble_size=5,
+        polynomial_degree=2, compiled_forward=False,
+        decomposed=True,
+    )
+
+    # Set a large linear coefficient that should survive
+    proj = model.rnn.projection
+    with torch.no_grad():
+        proj.constant_bias.fill_(0.0)
+        proj.linear_weight.fill_(5.0)  # Large coefficient
+        for weights in proj.higher_degree_weights.values():
+            for w in weights:
+                w.fill_(0.0)
+
+    # Run two rounds of pruning
+    with torch.no_grad():
+        ensemble_prune(model, alpha=0.05, delta=0.5)
+        ensemble_prune(model, alpha=0.05, delta=0.5)
+
+    # Linear term (self-term) should survive
+    self_idx = model.rnn._linear_indices[0].item()
+    assert model.coefficient_masks[:, 0, self_idx].all()

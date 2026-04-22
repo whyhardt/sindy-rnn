@@ -77,14 +77,14 @@ RNN_ENSEMBLE = 11
 RNN_EPOCHS = 1000
 RNN_WARMUP = 200
 RNN_LR = 1e-3
-RNN_L1 = 1e-3
-RNN_PRUNE_THRESHOLD = 0.1
-RNN_PRUNE_FREQ = 20
+RNN_L1 = 0#1e-3
+RNN_PRUNE_THRESHOLD = 0#0.01
+RNN_PRUNE_FREQ = 100
 RNN_REFIT = 100
 RNN_GRU_HIDDEN = None  # match SINDy-SHRED: GRU hidden_size = latent_dim
 
 # METHODS = ['sindy-shred', 'shred', 'sindy-rnn']
-METHODS = ['sindy-shred']
+METHODS = ['sindy-rnn']
 
 
 # ============================================================
@@ -402,6 +402,7 @@ def run_sindy_rnn(X, sensor_locs, train_end, full_dim, seed, save_dir=None):
     model = SparseAutoencoderRNN(
         sparse_dim=NUM_SENSORS, full_dim=full_dim, latent_dim=LATENT_DIM,
         ensemble_size=RNN_ENSEMBLE, polynomial_degree=POLY_ORDER,
+        dt=DT,
         encoder_type='gru',
         encoder_gru_hidden_dim=RNN_GRU_HIDDEN,
         encoder_num_layers=GRU_LAYERS,
@@ -426,7 +427,7 @@ def run_sindy_rnn(X, sensor_locs, train_end, full_dim, seed, save_dir=None):
     n_params = sum(p.numel() for p in model.parameters())
 
     try:
-        equations = model.get_continuous_equations(DT)
+        equations = model.get_continuous_equations()
     except Exception:
         equations = "N/A"
 

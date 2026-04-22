@@ -256,9 +256,10 @@ class TestEquationExtraction:
             state_names=['z1', 'z2', 'z3'],
         )
         eqs = model.get_equations()
-        assert 'z1[t+1]' in eqs
-        assert 'z2[t+1]' in eqs
-        assert 'z3[t+1]' in eqs
+        # With Euler parameterization, equations are in ODE form
+        assert 'dz1/dt' in eqs
+        assert 'dz2/dt' in eqs
+        assert 'dz3/dt' in eqs
 
     def test_get_continuous_equations(self):
         model = SparseAutoencoderRNN(
@@ -266,7 +267,7 @@ class TestEquationExtraction:
             ensemble_size=1, polynomial_degree=2,
             state_names=['z1', 'z2', 'z3'],
         )
-        eqs = model.get_continuous_equations(dt=0.01)
+        eqs = model.get_continuous_equations()
         assert 'dz1/dt' in eqs
         assert 'dz2/dt' in eqs
         assert 'dz3/dt' in eqs
