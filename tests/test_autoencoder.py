@@ -3,7 +3,7 @@
 import torch
 import pytest
 
-from sindy_rnn import SparseAutoencoderRNN, fit_autoencoder, ensemble_prune
+from sindy_rnn import SparseAutoencoderRNN, GRUEncoder, fit_autoencoder, ensemble_prune
 
 
 class TestMLPEncoderDecoder:
@@ -485,4 +485,161 @@ class TestSaveLoad:
         with torch.no_grad():
             out1, _, _ = model(x, controls=u)
             out2, _, _ = loaded(x, controls=u)
+        torch.testing.assert_close(out1, out2)
+
+
+class TestGRUEncoder:
+    """Test the GRU encoder."""
+
+    def test_gru_encoder_shapes(self):
+        enc = GRUEncoder(input_dim=10, latent_dim=4, num_layers=2)
+        x = torch.randn(3, 20, 10)  # (B, T, input_dim)
+        z = enc(x)
+        assert z.shape == (3, 20, 4)
+
+    def test_gru_encoder_with_projection(self):
+        """When hidden_dim != latent_dim, a projection layer is added."""
+        enc = GRUEncoder(input_dim=10, latent_dim=4, hidden_dim=64, num_layers=2)
+        assert enc.projection is not None
+        x = torch.randn(3, 20, 10)
+        z = enc(x)
+        assert z.shape == (3, 20, 4)
+
+    def test_gru_encoder_no_projection(self):
+        """When hidden_dim == latent_dim (default), no projection layer."""
+        enc = GRUEncoder(input_dim=10, latent_dim=4)
+        assert enc.projection is None
+        assert enc.hidden_dim == 4
+
+    def test_gru_encoder_handles_ensemble_dim(self):
+        """GRU should handle (E, B, T, input_dim) inputs."""
+        enc = GRUEncoder(input_dim=10, latent_dim=4, num_layers=2)
+        x = torch.randn(5, 3, 20, 10)  # (E, B, T, input_dim)
+        z = enc(x)
+        assert z.shape == (5, 3, 20, 4)
+
+    def test_gru_temporal_context(self):
+        """GRU output at time t should depend on inputs at t' < t (unlike MLP)."""
+        torch.manual_seed(42)
+        enc = GRUEncoder(input_dim=10, latent_dim=4, num_layers=2)
+        enc.eval()
+
+        x = torch.randn(1, 20, 10)
+        with torch.no_grad():
+            z_full = enc(x)  # (1, 20, 4)
+
+        # Modify an early timestep
+        x_mod = x.clone()
+        x_mod[:, 5, :] += 10.0
+        with torch.no_grad():
+            z_mod = enc(x_mod)
+
+        # Output at t=5 should change
+        assert not torch.allclose(z_full[:, 5], z_mod[:, 5], atol=1e-3)
+        # Output at t>5 should also change (temporal context propagates)
+        assert not torch.allclose(z_full[:, 10], z_mod[:, 10], atol=1e-3)
+        # Output at t<5 should NOT change (GRU is causal)
+        torch.testing.assert_close(z_full[:, :5], z_mod[:, :5])
+
+
+class TestSparseAutoencoderRNNWithGRU:
+    """Test the autoencoder with GRU encoder."""
+
+    def test_forward_shapes_gru(self):
+        model = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3,
+            ensemble_size=4, polynomial_degree=2,
+            encoder_type='gru',
+        )
+        sparse_obs = torch.randn(8, 50, 5)
+        full_pred, latent_pred, encoded = model(sparse_obs)
+        assert full_pred.shape == (4, 8, 50, 20)
+        assert latent_pred.shape == (4, 8, 50, 3)
+        assert encoded.shape == (8, 50, 3)
+
+    def test_forward_shapes_gru_with_hidden_dim(self):
+        model = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3,
+            ensemble_size=2, polynomial_degree=2,
+            encoder_type='gru', encoder_gru_hidden_dim=64,
+        )
+        sparse_obs = torch.randn(4, 30, 5)
+        full_pred, latent_pred, encoded = model(sparse_obs)
+        assert full_pred.shape == (2, 4, 30, 20)
+        assert latent_pred.shape == (2, 4, 30, 3)
+        assert encoded.shape == (4, 30, 3)
+
+    def test_gru_dynamics_still_autonomous(self):
+        """GRU encoder shouldn't add control terms to the polynomial."""
+        model = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3,
+            ensemble_size=1, polynomial_degree=2,
+            encoder_type='gru',
+        )
+        assert model.dynamics.rnn.n_controls == 0
+        terms = model.dynamics.library_terms
+        for t in terms:
+            assert 'p_' not in t
+
+    def test_forecast_with_gru_model(self):
+        model = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3,
+            ensemble_size=3, polynomial_degree=2,
+            encoder_type='gru',
+        )
+        model.eval()
+        z_init = torch.randn(3, 2, 3)
+        with torch.no_grad():
+            full_traj, latent_traj = model.forecast(z_init, n_steps=10)
+        assert full_traj.shape == (3, 2, 10, 20)
+        assert latent_traj.shape == (3, 2, 10, 3)
+
+    def test_encoder_type_stored(self):
+        model_mlp = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3, encoder_type='mlp')
+        model_gru = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3, encoder_type='gru')
+        assert model_mlp.encoder_type == 'mlp'
+        assert model_gru.encoder_type == 'gru'
+        assert isinstance(model_gru.encoder, GRUEncoder)
+
+    def test_fit_with_gru_encoder(self):
+        torch.manual_seed(42)
+        B, T = 5, 20
+        sparse_dim, full_dim, latent_dim = 4, 15, 3
+
+        sparse_obs = torch.randn(B, T, sparse_dim)
+        full_state = torch.randn(B, T, full_dim)
+
+        model = SparseAutoencoderRNN(
+            sparse_dim=sparse_dim, full_dim=full_dim, latent_dim=latent_dim,
+            ensemble_size=2, polynomial_degree=2,
+            encoder_type='gru',
+        )
+        fit_autoencoder(model, sparse_obs, full_state,
+                        epochs=10, verbose=False)
+
+    def test_save_load_gru(self, tmp_path):
+        model = SparseAutoencoderRNN(
+            sparse_dim=5, full_dim=20, latent_dim=3,
+            ensemble_size=2, polynomial_degree=2,
+            encoder_type='gru', encoder_gru_hidden_dim=32,
+            encoder_num_layers=3,
+        )
+        path = str(tmp_path / "model_gru.pt")
+        model.save(path)
+
+        loaded = SparseAutoencoderRNN.load(path)
+        assert loaded.encoder_type == 'gru'
+        assert isinstance(loaded.encoder, GRUEncoder)
+        assert loaded.encoder.hidden_dim == 32
+        assert loaded.encoder.num_layers == 3
+
+        # Check weights match
+        x = torch.randn(2, 10, 5)
+        model.eval()
+        loaded.eval()
+        with torch.no_grad():
+            out1, _, _ = model(x)
+            out2, _, _ = loaded(x)
         torch.testing.assert_close(out1, out2)

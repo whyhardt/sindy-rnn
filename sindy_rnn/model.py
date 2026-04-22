@@ -174,6 +174,7 @@ class EnsembleRNNModule(nn.Module):
         compiled_forward: bool = True,
         polynomial_degree: int = 2,
         decomposed: bool = True,
+        direct: bool = False,
     ):
         super().__init__()
         n_features = n_states + n_controls
@@ -182,8 +183,26 @@ class EnsembleRNNModule(nn.Module):
         self.n_controls = n_controls
         self.ensemble_size = ensemble_size
         self._decomposed = decomposed
+        self._direct = direct
+        self._degree = polynomial_degree
 
-        if decomposed:
+        # Precompute library structure over n_features (needed before direct theta init)
+        lib = build_library_structure(n_features, polynomial_degree)
+        self._library_terms = lib['terms']
+        self._n_library_terms = lib['n_terms']
+        self._bias_index = lib['bias_index']
+        self.register_buffer('_mult_table', lib['mult_table'])
+        self.register_buffer('_linear_indices', lib['linear_indices'])
+
+        # Polynomial parameterization
+        if direct:
+            # Direct: theta is an nn.Parameter, no projection layer
+            self.theta = nn.Parameter(
+                torch.zeros(ensemble_size, n_states, self._n_library_terms)
+            )
+            nn.init.normal_(self.theta, std=0.01)
+            self.projection = None
+        elif decomposed:
             self.projection = DecomposedPolynomialLayer(
                 ensemble_size=ensemble_size,
                 input_size=n_features,
@@ -206,16 +225,8 @@ class EnsembleRNNModule(nn.Module):
 
         self.feature_dropout_p = feature_dropout
 
-        # Precompute library structure over n_features
-        lib = build_library_structure(n_features, polynomial_degree)
-        self._library_terms = lib['terms']
-        self._n_library_terms = lib['n_terms']
-        self._bias_index = lib['bias_index']
-        self.register_buffer('_mult_table', lib['mult_table'])
-        self.register_buffer('_linear_indices', lib['linear_indices'])
-
         self._compiled_forward = None
-        if compiled_forward:
+        if compiled_forward and not direct:
             try:
                 self._compiled_forward = torch.compile(self._forward_impl, dynamic=True)
             except Exception:
@@ -224,9 +235,11 @@ class EnsembleRNNModule(nn.Module):
     def _forward_impl(self, h, u=None):
         """Core forward implementation."""
         x_t = torch.cat([h, u], dim=-1) if u is not None else h
-        c = self.projection(x_t)
-        # if self.dropout.p > 0:
-        #     c = self.dropout(c)
+        if self._direct:
+            library = self._compute_library(x_t)
+            c = torch.einsum('ebt,ent->ebn', library, self.theta)
+        else:
+            c = self.projection(x_t)
         alpha = torch.sigmoid(self.damping_coefficient).view(-1, 1, 1)  # (E, 1, 1)
         alpha_n = alpha if self.scale_candidate else 1.0
         return (1 - alpha) * h + alpha_n * c
@@ -281,11 +294,16 @@ class EnsembleRNNModule(nn.Module):
         return (1 - alpha) * h + alpha_n * n
 
     def unfold_polynomial_coefficients(self) -> Tensor:
-        """Unfold weight matrices into polynomial coefficients via recursive expansion.
+        """Return polynomial coefficients in monomial basis.
+
+        For direct mode, returns self.theta directly.
+        For factored modes, unfolds weight matrices via recursive expansion.
 
         Returns:
             theta: (E, n_states, n_terms) — polynomial coefficients in monomial basis
         """
+        if self._direct:
+            return self.theta
         if self._decomposed:
             return self._unfold_decomposed()
         return self._unfold_coupled()
@@ -429,6 +447,7 @@ class PolynomialRNN(nn.Module):
         compiled_forward: bool = False,
         initial_state: Union[float, Tensor] = 0.,
         decomposed: bool = True,
+        direct: bool = False,
     ):
         super().__init__()
         self.n_states = n_states
@@ -445,6 +464,7 @@ class PolynomialRNN(nn.Module):
             compiled_forward=compiled_forward,
             polynomial_degree=polynomial_degree,
             decomposed=decomposed,
+            direct=direct,
         )
 
         n_library_terms = self.rnn._n_library_terms
@@ -542,10 +562,11 @@ class PolynomialRNN(nn.Module):
                 'n_states': self.n_states,
                 'n_controls': self.rnn.n_controls,
                 'ensemble_size': self.ensemble_size,
-                'polynomial_degree': self.rnn.projection.degree,
+                'polynomial_degree': self.rnn._degree,
                 'state_names': self.state_names,
                 'control_names': self.control_names,
                 'decomposed': self.rnn._decomposed,
+                'direct': self.rnn._direct,
             }
         }, path)
 
@@ -554,9 +575,11 @@ class PolynomialRNN(nn.Module):
         """Load saved model. kwargs override saved config."""
         checkpoint = torch.load(path, weights_only=False)
         config = {**checkpoint['config'], **kwargs}
-        # Backward compat: old checkpoints don't have 'decomposed'
+        # Backward compat: old checkpoints may not have these keys
         if 'decomposed' not in config:
             config['decomposed'] = False
+        if 'direct' not in config:
+            config['direct'] = False
         model = cls(**config)
         model.load_state_dict(checkpoint['state_dict'])
         model.coefficient_masks.copy_(checkpoint['coefficient_masks'])

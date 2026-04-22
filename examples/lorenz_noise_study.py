@@ -111,6 +111,7 @@ def run_experiment(noise_std, trajectory_clean, config, seed=42):
         dropout=config['dropout'],
         feature_dropout=config['feature_dropout'],
         compiled_forward=False,
+        direct=config.get('direct', False),
         decomposed=False,
     ).to(DEVICE)
 
@@ -126,7 +127,7 @@ def run_experiment(noise_std, trajectory_clean, config, seed=42):
         learning_rate=config['learning_rate'],
         l2=config['l2'],
         dt=config['dt'],
-        refit_epochs=0,
+        refit_epochs=config.get('refit_epochs', 0),
         verbose=True,
     )
 
@@ -178,7 +179,9 @@ def main():
         'ensemble_pruning_alpha': 0.05,
         'feature_dropout': 0.,
         'dropout': 0.1,
-        'noise_fractions': [0.],#, 0.01, 0.02, 0.05, 0.1],
+        'direct': False,
+        'refit_epochs': 200,
+        'noise_fractions': [0., 0.01, 0.02, 0.05, 0.1],
     }
 
     print(f"\nSettings: {config}")

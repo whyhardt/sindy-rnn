@@ -10,12 +10,13 @@ from .polynomial_library import (
 )
 from .equations import get_coefficients, get_equations, get_continuous_equations
 from .pruning import ensemble_prune, threshold_prune, minimum_effect_ci_test
-from .autoencoder import SparseAutoencoderRNN, fit_autoencoder
+from .autoencoder import SparseAutoencoderRNN, GRUEncoder, fit_autoencoder
 
 __all__ = [
     'PolynomialRNN',
     'fit',
     'SparseAutoencoderRNN',
+    'GRUEncoder',
     'fit_autoencoder',
     'EnsembleRNNModule',
     'EnsemblePolynomialLayer',

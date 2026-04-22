@@ -1,11 +1,16 @@
 """Encoder-decoder architecture for sparse observation settings.
 
-Wraps PolynomialRNN with MLP encoder/decoder to learn latent dynamics
+Wraps PolynomialRNN with encoder/decoder to learn latent dynamics
 from sparse measurements via teacher-forced next-state prediction:
 
     z_t = encoder(sparse_obs_t)                         # encode current sensors to latent
     z_{t+1} = (1-α) * z_t + P(z_t)                     # polynomial dynamics in latent space
     full_pred_{t+1} = decoder(z_{t+1})                  # decode predicted next state
+
+Two encoder types:
+  - MLP: processes each timestep independently (no temporal context)
+  - GRU: accumulates temporal context from the sensor sequence, providing
+    better state estimation from sparse measurements (Takens' delay embedding)
 
 Teacher forcing: at each training step, z_t comes from encoding the ACTUAL
 sensors (not the model's own prediction). The polynomial P(z) operates
@@ -79,6 +84,68 @@ class MLPEncoder(nn.Module):
         return self.net(x)
 
 
+class GRUEncoder(nn.Module):
+    """GRU encoder mapping sparse sensor sequences to latent states.
+
+    Unlike the MLP encoder which processes each timestep independently,
+    the GRU accumulates temporal context from the sensor sequence. This
+    provides better state estimation from sparse measurements via temporal
+    observability (Takens' delay embedding).
+
+    Architecture: GRU(input_dim -> hidden_dim, num_layers) [-> Linear(hidden_dim -> latent_dim)]
+    The projection layer is only added when hidden_dim != latent_dim.
+
+    Args:
+        input_dim: dimension of sparse measurement vector
+        latent_dim: dimension of output latent state
+        hidden_dim: GRU hidden dimension (default: same as latent_dim)
+        num_layers: number of stacked GRU layers (default: 2)
+        dropout: dropout between GRU layers (applied only when num_layers > 1)
+    """
+
+    def __init__(self, input_dim: int, latent_dim: int,
+                 hidden_dim: Optional[int] = None, num_layers: int = 2,
+                 dropout: float = 0.1):
+        super().__init__()
+        hidden_dim = hidden_dim if hidden_dim is not None else latent_dim
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+        self.num_layers = num_layers
+
+        self.gru = nn.GRU(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.,
+        )
+
+        if hidden_dim != latent_dim:
+            self.projection = nn.Linear(hidden_dim, latent_dim)
+            nn.init.xavier_uniform_(self.projection.weight)
+            nn.init.zeros_(self.projection.bias)
+        else:
+            self.projection = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: (..., T, input_dim) — any leading batch dimensions
+        Returns:
+            z: (..., T, latent_dim)
+        """
+        leading_shape = x.shape[:-2]
+        T, F = x.shape[-2], x.shape[-1]
+        x_flat = x.reshape(-1, T, F)  # (B_flat, T, input_dim)
+
+        output, _ = self.gru(x_flat)  # (B_flat, T, hidden_dim)
+
+        if self.projection is not None:
+            output = self.projection(output)  # (B_flat, T, latent_dim)
+
+        return output.reshape(*leading_shape, T, self.latent_dim)
+
+
 class MLPDecoder(nn.Module):
     """MLP decoder mapping latent state back to full state.
 
@@ -136,6 +203,11 @@ class SparseAutoencoderRNN(nn.Module):
     to full state. Teacher forcing: z_t always comes from encoding actual
     sensors, not from the model's own predictions.
 
+    Two encoder types:
+      - 'mlp': Per-timestep MLP, no temporal context
+      - 'gru': GRU accumulates temporal context from sensor sequence,
+        providing better state estimation from sparse measurements
+
     The polynomial P operates only on the latent state z (and optional external
     controls u). The discovered equations are dz/dt = f(z) — no sensor terms.
 
@@ -150,9 +222,12 @@ class SparseAutoencoderRNN(nn.Module):
         n_controls: number of external control inputs
         ensemble_size: number of independent ensemble members
         polynomial_degree: degree for PolynomialRNN
-        encoder_hidden_dims: encoder MLP hidden widths ([] for single linear layer)
+        encoder_type: 'mlp' or 'gru'
+        encoder_hidden_dims: MLP encoder hidden widths ([] for single linear layer)
+        encoder_gru_hidden_dim: GRU hidden dimension (default: latent_dim)
+        encoder_num_layers: number of GRU layers (default: 2)
         decoder_hidden_dims: decoder MLP hidden widths
-        encoder_dropout: dropout for encoder MLP
+        encoder_dropout: dropout for encoder
         decoder_dropout: dropout for decoder MLP
         state_names: names for latent state variables
         control_names: names for external control variables
@@ -169,7 +244,10 @@ class SparseAutoencoderRNN(nn.Module):
         n_controls: int = 0,
         ensemble_size: int = 1,
         polynomial_degree: int = 2,
+        encoder_type: str = 'mlp',
         encoder_hidden_dims: Optional[List[int]] = None,
+        encoder_gru_hidden_dim: Optional[int] = None,
+        encoder_num_layers: int = 2,
         decoder_hidden_dims: Optional[List[int]] = None,
         encoder_dropout: float = 0.1,
         decoder_dropout: float = 0.1,
@@ -178,14 +256,24 @@ class SparseAutoencoderRNN(nn.Module):
         dynamics_dropout: float = 0.,
         dynamics_feature_dropout: float = 0.,
         decomposed: bool = True,
+        direct: bool = False,
     ):
         super().__init__()
         self.sparse_dim = sparse_dim
         self.full_dim = full_dim
         self.latent_dim = latent_dim
         self._n_external_controls = n_controls
+        self.encoder_type = encoder_type
 
-        self.encoder = MLPEncoder(sparse_dim, latent_dim, encoder_hidden_dims, encoder_dropout)
+        if encoder_type == 'gru':
+            self.encoder = GRUEncoder(
+                sparse_dim, latent_dim,
+                hidden_dim=encoder_gru_hidden_dim,
+                num_layers=encoder_num_layers,
+                dropout=encoder_dropout,
+            )
+        else:
+            self.encoder = MLPEncoder(sparse_dim, latent_dim, encoder_hidden_dims, encoder_dropout)
         self.decoder = MLPDecoder(latent_dim, full_dim, decoder_hidden_dims, decoder_dropout)
 
         # Polynomial operates on z only (+ optional external controls).
@@ -202,6 +290,7 @@ class SparseAutoencoderRNN(nn.Module):
             dropout=dynamics_dropout,
             feature_dropout=dynamics_feature_dropout,
             decomposed=decomposed,
+            direct=direct,
         )
 
     @property
@@ -310,20 +399,26 @@ class SparseAutoencoderRNN(nn.Module):
 
     def save(self, path: str):
         """Save full model state."""
+        config = {
+            'sparse_dim': self.sparse_dim,
+            'full_dim': self.full_dim,
+            'latent_dim': self.latent_dim,
+            'n_controls': self._n_external_controls,
+            'ensemble_size': self.dynamics.ensemble_size,
+            'polynomial_degree': self.dynamics.rnn._degree,
+            'state_names': self.dynamics.state_names,
+            'decomposed': self.dynamics.rnn._decomposed,
+            'direct': self.dynamics.rnn._direct,
+            'encoder_type': self.encoder_type,
+        }
+        if self.encoder_type == 'gru':
+            config['encoder_gru_hidden_dim'] = self.encoder.hidden_dim
+            config['encoder_num_layers'] = self.encoder.num_layers
         torch.save({
             'state_dict': self.state_dict(),
             'coefficient_masks': self.dynamics.coefficient_masks,
             'pruning_patience': self.dynamics.pruning_patience,
-            'config': {
-                'sparse_dim': self.sparse_dim,
-                'full_dim': self.full_dim,
-                'latent_dim': self.latent_dim,
-                'n_controls': self._n_external_controls,
-                'ensemble_size': self.dynamics.ensemble_size,
-                'polynomial_degree': self.dynamics.rnn.projection.degree,
-                'state_names': self.dynamics.state_names,
-                'decomposed': self.dynamics.rnn._decomposed,
-            }
+            'config': config,
         }, path)
 
     @classmethod
@@ -331,6 +426,9 @@ class SparseAutoencoderRNN(nn.Module):
         """Load saved model. kwargs override saved config."""
         checkpoint = torch.load(path, weights_only=False)
         config = {**checkpoint['config'], **kwargs}
+        # Backward compat
+        if 'direct' not in config:
+            config['direct'] = False
         model = cls(**config)
         model.load_state_dict(checkpoint['state_dict'])
         model.dynamics.coefficient_masks.copy_(checkpoint['coefficient_masks'])

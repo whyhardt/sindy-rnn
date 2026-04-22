@@ -1,5 +1,16 @@
 # Technical Specification: Polynomial RNN for Sparse Nonlinear Dynamics Discovery
 
+## Workflow Rules
+
+**Always sanity-check before large studies.** Before launching multi-seed or grid-search experiments, first run a single-seed quick test to verify that the model achieves expected performance. Compare against known baselines from previous runs. Only scale up once the single run looks correct. Changing hyperparameters "to match baselines" can silently degrade performance — always verify with a quick run first.
+
+**Shared reconstruction-based evaluation for benchmarks.** When comparing different methods (sindy-rnn, SINDy-SHRED, SHRED, etc.), all methods MUST be evaluated using the SAME metric on the SAME held-out data. The standard protocol is:
+1. Each method trains with its own internal objective (next-step prediction, SINDy regularization, etc.)
+2. After training, each method produces a **full-state reconstruction array** `(n_frames, full_dim)` — the reconstructed field at every timestep.
+3. All methods are then evaluated on the **same held-out test frames** using MSE and relative error between reconstruction and ground truth (in scaled space).
+4. This is an apples-to-apples comparison regardless of each method's internal training objective.
+Never compare internal training/validation losses across methods — they measure different things (next-step prediction vs same-timestep reconstruction, different loss functions, different data splits).
+
 ## Purpose of This Document
 
 This document specifies every technical detail needed to build a **standalone Python package** that implements a multilinear/polynomial RNN with ensemble-based sparse pruning for discovering interpretable dynamical systems from sequential data.
@@ -1387,3 +1398,318 @@ Optional: `matplotlib` for examples.
 - **No intermediate projection.** `EnsemblePolynomialLayer` maps directly from n_features → n_states. There is no `weight_n`, no `proj_size`, no `bias_n` readout. The unfolding produces `(E, n_states, n_terms)` directly from the D weight matrices.
 - **Use `torch.compile` with `dynamic=True`** and a try/except fallback — not all environments support it.
 - **`scipy.stats.t.ppf`** is the only scipy dependency — used only at pruning time, not in the forward pass.
+
+---
+
+## 16. Polynomial Parameterizations
+
+`EnsembleRNNModule` supports three polynomial parameterizations, selected via the `decomposed` and `direct` flags:
+
+### 16.1 Factored (Original): `decomposed=False, direct=False`
+
+The original `EnsemblePolynomialLayer` — product of D affine projections (weight + bias per factor). Each factor includes a bias term, so the product of D forms mixes degrees: the bias interactions produce lower-degree terms alongside the degree-D monomial terms.
+
+### 16.2 Decomposed (Default): `decomposed=True, direct=False`
+
+`DecomposedPolynomialLayer` — separate parameterization per polynomial degree:
+- **d=0**: Learnable bias `(E, n_states)` — constant term only
+- **d=1**: Single weight matrix `(E, n_states, n_features)` — linear terms only
+- **d>=2**: Product of d **bias-free** linear forms — produces only degree-d monomials (no lower-degree leakage)
+
+This completely decouples coefficients across degrees. Bias-free products for d>=2 ensure that degree-d parameters can only generate degree-d monomials, eliminating the algebraic constraints that arise when a single product-of-forms must encode both linear and nonlinear terms through weight-bias interactions.
+
+The output is the sum: `constant + linear(x) + Σ_{d>=2} product_d(x)`.
+
+### 16.3 Direct: `decomposed=False, direct=True`
+
+`theta = nn.Parameter(E, n_states, n_terms)` — coefficients are direct learnable parameters in the monomial basis. No projection layer. Forward pass computes the library then contracts with theta. Initialized with `normal_(std=0.01)`.
+
+The direct mode has no implicit regularization from factorization. Used as a baseline to isolate the contribution of the factored/decomposed parameterization.
+
+### 16.4 Unfolding
+
+All three modes implement `unfold_polynomial_coefficients() -> (E, n_states, n_terms)`:
+- **Factored**: `_unfold_coupled()` — recursive expansion of the product of D affine forms
+- **Decomposed**: `_unfold_decomposed()` — unfolds each degree independently, sums results
+- **Direct**: Returns `self.theta` directly
+
+The key invariant (`forward == forward_polynomial(mask=ones)`) holds for all three modes.
+
+---
+
+## 17. SparseAutoencoderRNN
+
+Encoder-decoder wrapper around `PolynomialRNN` for discovering latent dynamics from sparse sensor measurements. Used for the spatiotemporal benchmarks (cylinder flow, SST).
+
+### 17.1 Architecture
+
+```
+z_t = encoder(sparse_obs_t)                         # encode sensors to latent
+z_{t+1} = (1-α) * z_t + P(z_t [, u_t])             # polynomial dynamics (autonomous)
+full_pred_{t+1} = decoder(z_{t+1})                   # decode to full state
+```
+
+**Teacher forcing:** At each training step, `z_t` comes from encoding the actual sensors, not the model's own prediction. The polynomial `P(z)` operates autonomously on the latent state — no sensor terms in the polynomial library. The discovered equations are `dz/dt = f(z)` only.
+
+**Component sharing:** The encoder and decoder are shared across ensemble members. Only the inner `PolynomialRNN` (stored as `self.dynamics`) has E independent members. Pruning and equation extraction operate on `self.dynamics` directly.
+
+### 17.2 Constructor
+
+```python
+SparseAutoencoderRNN(
+    sparse_dim: int,           # dimension of sparse measurement vector
+    full_dim: int,             # dimension of full state (decoder output)
+    latent_dim: int,           # dimension of latent state (= PolynomialRNN.n_states)
+    n_controls: int = 0,       # number of external control inputs
+    ensemble_size: int = 1,    # number of independent ensemble members
+    polynomial_degree: int = 2,
+    encoder_type: str = 'mlp', # 'mlp' or 'gru'
+    encoder_hidden_dims: Optional[List[int]] = None,  # MLP hidden widths
+    encoder_gru_hidden_dim: Optional[int] = None,     # GRU hidden dim
+    encoder_num_layers: int = 2,
+    decoder_hidden_dims: Optional[List[int]] = None,
+    encoder_dropout: float = 0.1,
+    decoder_dropout: float = 0.1,
+    dynamics_dropout: float = 0.,
+    dynamics_feature_dropout: float = 0.,
+    state_names: Optional[List[str]] = None,
+    control_names: Optional[List[str]] = None,
+    decomposed: bool = True,
+    direct: bool = False,
+)
+```
+
+### 17.3 Encoder Types
+
+**MLPEncoder:** `Linear -> ReLU -> Dropout -> ... -> Linear`. Processes each timestep independently (no temporal context). Default hidden_dims=[128, 64].
+
+**GRUEncoder:** `GRU(input_dim -> hidden_dim, num_layers) [-> Linear(hidden_dim -> latent_dim)]`. Accumulates temporal context from the sensor sequence, providing better state estimation via temporal observability (Takens' delay embedding). Projection layer only added when `hidden_dim != latent_dim`. This is the encoder used in the SHRED architecture and all spatiotemporal benchmarks.
+
+**MLPDecoder:** `Linear -> ReLU -> Dropout -> ... -> Linear`. Maps latent state back to full state. Default hidden_dims=[64, 128].
+
+### 17.4 Forward Pass
+
+```python
+def forward(self, sparse_obs, controls=None):
+    encoded = self.encoder(sparse_obs)     # (..., T, latent_dim)
+    dynamics_input = cat([encoded, controls]) if controls else encoded
+    latent_pred, _ = self.dynamics(dynamics_input)  # (E, B, T, latent_dim)
+    full_pred = self.decoder(latent_pred)           # (E, B, T, full_dim)
+    return full_pred, latent_pred, encoded
+```
+
+### 17.5 Forecast (Autonomous Evolution)
+
+```python
+def forecast(self, z_init, n_steps, controls=None):
+    """Evolve latent state using only polynomial dynamics P(z).
+    Args:
+        z_init: (E, B, latent_dim) — initial state (from encoder)
+        n_steps: number of forecast steps
+    Returns:
+        full_traj: (E, B, n_steps, full_dim)
+        latent_traj: (E, B, n_steps, latent_dim)
+    """
+```
+
+The encoder provides z_0 from the last observation, then P(z) evolves forward without sensor input.
+
+### 17.6 Delegation
+
+All equation extraction methods delegate to `self.dynamics`:
+- `get_equations()`, `get_continuous_equations(dt)`, `get_coefficients(aggregate)`
+- `count_active_terms()`, `print_equations()`
+- `save(path)`, `load(path)` — save/load full model state including config
+
+---
+
+## 18. Autoencoder Training (`fit_autoencoder`)
+
+```python
+def fit_autoencoder(
+    model: SparseAutoencoderRNN,
+    sparse_obs: Tensor,            # (B, T, sparse_dim) — sensor measurements
+    full_state_next: Tensor,       # (B, T, full_dim) — prediction targets (next timestep)
+    controls: Optional[Tensor] = None,
+    sparse_obs_test: Optional[Tensor] = None,
+    full_state_next_test: Optional[Tensor] = None,
+    controls_test: Optional[Tensor] = None,
+    epochs: int = 500,
+    warmup_steps: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    learning_rate: float = 1e-3,
+    l1: float = 1e-4,             # L1 penalty weight (named l1, not l2)
+    pruning_frequency: int = 1,
+    pruning_threshold: Optional[float] = None,
+    ensemble_pruning_alpha: float = 0.05,
+    pruning_method: str = 'median',
+    dt: Optional[float] = None,
+    include_bias: bool = True,
+    interaction_only: bool = False,
+    refit_epochs: int = 0,
+    refit_learning_rate: Optional[float] = None,
+    verbose: bool = True,
+)
+```
+
+### 18.1 Differences from `fit()`
+
+| Aspect | `fit()` | `fit_autoencoder()` |
+|--------|---------|---------------------|
+| L1 param name | `l2` | `l1` |
+| Default pruning method | `'ci'` | `'median'` |
+| Default learning rate | `1e-2` | `1e-3` |
+| Bootstrap | Pre-expands data `xs[indices]` → `(E, B, T, F)` | **Lazy indexing** — stores indices only, indexes into data on each batch. Avoids pre-expanding high-dim `full_state_next` which can be GBs. |
+| Test evaluation | Full-batch | **Per-window loop** — evaluates one window at a time to avoid OOM on high-dim decoder outputs |
+| Loss target | MSE on next-state `ys` | MSE on decoded full state vs `full_state_next` |
+| Refit phase | Supported (same as below) | Supported: `refit_epochs` with `l1=0`, frozen mask, `lr = learning_rate / 5` |
+| Memory cleanup | None | `del full_pred, full_next_b, sparse_b, ctrl_b, loss` after each forward pass to reduce memory before test eval/pruning |
+
+### 18.2 Refit Phase
+
+After the main training loop, if `refit_epochs > 0`:
+1. Delete the main optimizer (free memory)
+2. Create new Adam optimizer with `lr = refit_learning_rate or learning_rate / 5`
+3. Train for `refit_epochs` with `l1=0` and frozen sparsity mask
+4. This debiases coefficients that were shrunk by L1 during main training
+
+---
+
+## 19. Benchmark Study (NeurIPS Submission)
+
+### 19.1 Overview
+
+Three experimental settings comparing SINDy-RNN against baselines:
+
+1. **Lorenz parameter recovery** — Direct comparison of factored vs direct vs STLSQ on clean trajectories with varying noise and data size (450 experiments)
+2. **Cylinder flow reconstruction** — SINDy-RNN-SHRED vs SHRED vs SINDy-SHRED on 400×1000 grayscale flow field from 200 random sensors
+3. **SST reconstruction** — Same three methods on NOAA weekly SST from 250 sparse ocean sensors
+
+### 19.2 Lorenz Parameter Recovery
+
+**Grid:** 6 noise levels (0–20%) × 5 data sizes (500–10000) × 5 seeds = 450 experiments
+
+**Methods:**
+- **SINDy-RNN (factored)**: `decomposed=True`, multilinear factorization
+- **SINDy-RNN (direct)**: `direct=True`, learnable parameters
+- **SINDy (STLSQ)**: Classical SINDy via PySINDy
+
+**Key finding:** Factored achieves 100% exact structure match at 5% noise / N>=5000, while both direct and STLSQ achieve 0%.
+
+**Script:** `examples/lorenz_parameter_recovery.py`
+
+### 19.3 Cylinder Flow
+
+**Data:** `data/flow_over_cylinder.npy` — 334 frames, 400×1000 grayscale (~1GB)
+- Train: 80%, Test: 20% (last ~67 frames)
+- 200 random sensors (0.05% spatial coverage)
+
+**Config:**
+| Parameter | SINDy-RNN-SHRED | SINDy-SHRED | SHRED |
+|-----------|-----------------|-------------|-------|
+| Encoder | GRU(200→4), 2 layers | Same | Same |
+| Decoder | MLP(4→350→400→400K) | Same | Same |
+| poly_order/degree | 3 (cubic) | 3 | N/A |
+| Ensemble | E=11, median pruning | E=5 (hardcoded) | N/A |
+| epochs | 1000 | 1000 | 1000 |
+| warmup/refit | 500/200 | patience=20 | N/A |
+| lr | 1e-3 | 5e-4 | 5e-4 |
+| batch_size | 1 | 64 | 64 |
+| L1/sindy_reg | 5e-3 | 10.0 | N/A |
+| pruning_threshold | 0.2 | 1e-3 | N/A |
+| thres_epoch | N/A | 300 | 300 |
+| dt | 1/30 | N/A | N/A |
+| window (lags) | 30 | 60 | 60 |
+
+**GPU memory note:** SINDy-SHRED decoder is ~160M params. Must `.cpu()` and `torch.cuda.empty_cache()` between methods on same GPU.
+
+**Script:** `examples/cylinder_benchmark_seeds.py`
+
+### 19.4 SST
+
+**Data:** NOAA OI SST V2 (1992–2019), 1400 weekly snapshots, ~44,000 sea grid points
+- Train: 80%, Test: last ~318 frames
+- 250 random ocean sensors
+
+**Config:**
+| Parameter | SINDy-RNN-SHRED | SINDy-SHRED | SHRED |
+|-----------|-----------------|-------------|-------|
+| Encoder | GRU(250→3), 2 layers | Same | Same |
+| Decoder | MLP(3→350→400→44,219) | Same | Same |
+| poly_order/degree | 3 (cubic, pruned to linear) | 3 | N/A |
+| Ensemble | E=11 | E=5 | N/A |
+| epochs | 500 | 1000 | 1000 |
+| warmup/refit | 200/100 | patience=5 | N/A |
+| lr | 1e-3 | 1e-3 | 1e-3 |
+| L1/sindy_reg | 1e-3 | 10.0 | N/A |
+| pruning_threshold | 0.05 | 1.0 | N/A |
+| dt | 1/52 | N/A | N/A |
+| window (lags) | 52 | 52 | 52 |
+
+**Script:** `examples/sst_benchmark.py`
+
+### 19.5 Evaluation Protocol
+
+All three SHRED variants are evaluated on the same held-out test frames using:
+- **MSE** in raw (unscaled) space
+- **Relative error** = ||pred - true||_F / ||true||_F
+
+For SINDy-RNN-SHRED, teacher-forced reconstruction is used (encoder provides z_t at each step). The same procedure is used for all methods for fair comparison.
+
+### 19.6 SINDy-SHRED Reference
+
+The SINDy-SHRED reference code is in `sindy-shred/` (root level). Key files:
+- `sindy_shred.py` — SINDySHRED wrapper class
+- `sindy_shred_net.py` — network with `E_SINDy` inner class (`num_replicates=5`, hardcoded)
+- `sindy.py` — polynomial library
+- `utils.py` — data prep utilities
+
+**Import pattern:**
+```python
+import math; import numpy as np; np.math = math  # pysindy numpy 2.x fix
+sys.path.insert(0, 'sindy-shred/')
+from sindy_shred import SINDySHRED
+```
+
+---
+
+## 20. Updated Repository Structure
+
+```
+sindy-rnn/
+├── sindy_rnn/
+│   ├── __init__.py                    # Public API
+│   ├── model.py                       # PolynomialRNN, EnsembleRNNModule,
+│   │                                  #   EnsemblePolynomialLayer,
+│   │                                  #   DecomposedPolynomialLayer, EnsembleLinear
+│   ├── training.py                    # fit()
+│   ├── autoencoder.py                 # SparseAutoencoderRNN, MLPEncoder,
+│   │                                  #   GRUEncoder, MLPDecoder, fit_autoencoder
+│   ├── pruning.py                     # ensemble_prune, median_effect_test, etc.
+│   ├── polynomial_library.py          # build_library_structure, etc.
+│   └── equations.py                   # get_coefficients, get_equations, etc.
+├── examples/
+│   ├── lorenz_parameter_recovery.py   # Lorenz noise/data grid (450 experiments)
+│   ├── lorenz_noise_study.py          # Single-noise-level Lorenz study
+│   ├── cylinder_flow.py               # Single-run cylinder flow example
+│   ├── cylinder_benchmark.py          # Cylinder: single seed, 3 methods
+│   ├── cylinder_benchmark_seeds.py    # Cylinder: 5 seeds, 3 methods (+ model saving)
+│   ├── sst_discovery.py               # Single-run SST discovery
+│   ├── sst_benchmark.py               # SST: 5 seeds, 3 methods (+ model saving)
+│   └── sanity_check.py                # Linear system sanity check
+├── tests/
+│   ├── test_polynomial_layer.py       # forward == forward_polynomial invariant
+│   ├── test_unfolding.py              # Known polynomial recovery
+│   ├── test_pruning.py                # CI test, patience, mask updates
+│   ├── test_training.py               # End-to-end: linear system recovery
+│   └── test_autoencoder.py            # Autoencoder forward, forecast, fit, save/load
+├── results/
+│   ├── README.md                      # Full experimental results report
+│   └── params/                        # Saved model checkpoints (from benchmarks)
+├── sindy-shred/                       # SINDy-SHRED reference code (external)
+├── data/                              # Dataset files (not in git)
+│   └── flow_over_cylinder.npy
+├── requirements.txt
+├── CLAUDE.md                          # This file
+└── README.md
+```

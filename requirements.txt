@@ -3,3 +3,4 @@ numpy
 scipy
 matplotlib
 pytest
+pysindy>=2.0
