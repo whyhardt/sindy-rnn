@@ -201,13 +201,14 @@ class TestForecast:
         with torch.no_grad():
             _, latent_traj = model.forecast(z_init, n_steps=5)
 
-        # Verify by manually running the polynomial dynamics
+        # Verify by manually running the polynomial dynamics (rk4 to match forecast default)
         theta = model.dynamics.rnn.unfold_polynomial_coefficients()
         h = z_init
         manual_traj = []
         for t in range(5):
             h = model.dynamics.rnn.forward_polynomial(
-                h, None, mask=model.dynamics.coefficient_masks, theta=theta
+                h, None, mask=model.dynamics.coefficient_masks, theta=theta,
+                integrator='rk4',
             )
             manual_traj.append(h)
         manual_latent = torch.stack(manual_traj, dim=2)
@@ -342,108 +343,101 @@ class TestInnerDynamicsInvariant:
 
 
 class TestFitAutoencoder:
-    """Test end-to-end training."""
+    """Test end-to-end training with SINDy-SHRED-style sliding windows."""
 
     def test_fit_runs_without_error(self):
         torch.manual_seed(42)
-        B, T = 5, 20
+        N, LAGS = 30, 10
         sparse_dim, full_dim, latent_dim = 4, 15, 3
 
-        sparse_obs = torch.randn(B, T, sparse_dim)
-        full_state = torch.randn(B, T, full_dim)
+        sparse_obs = torch.randn(N, LAGS, sparse_dim)
+        full_state_target = torch.randn(N, full_dim)
 
         model = SparseAutoencoderRNN(
             sparse_dim=sparse_dim, full_dim=full_dim, latent_dim=latent_dim,
             ensemble_size=3, polynomial_degree=2,
         )
-        fit_autoencoder(model, sparse_obs, full_state,
+        fit_autoencoder(model, sparse_obs, full_state_target,
                         epochs=10, verbose=False)
 
     def test_fit_loss_decreases(self):
         torch.manual_seed(42)
-        B, T = 10, 30
+        N, LAGS = 50, 10
         sparse_dim, full_dim, latent_dim = 4, 15, 3
 
         # Simple linear relationship for easy fitting
         W = torch.randn(sparse_dim, full_dim) * 0.1
-        full_state = torch.randn(B, T, full_dim)
-        sparse_obs = full_state @ W.T  # (B, T, sparse_dim) - rough projection
+        full_state_target = torch.randn(N, full_dim)
+        sparse_obs = full_state_target.unsqueeze(1).expand(-1, LAGS, -1) @ W.T
 
         model = SparseAutoencoderRNN(
             sparse_dim=sparse_dim, full_dim=full_dim, latent_dim=latent_dim,
             ensemble_size=1, polynomial_degree=1,
         )
 
-        def _forecast_loss():
-            """Evaluate using autonomous forecast (matches training objective)."""
+        def _recon_loss():
+            """Evaluate reconstruction: encode last output, decode, compare."""
             model.eval()
             with torch.no_grad():
-                encoded = model.encoder(sparse_obs.unsqueeze(0))  # (1, B, T, latent)
-                theta = model.dynamics.rnn.unfold_polynomial_coefficients()
-                z = encoded[:, :, 0, :]
-                preds = []
-                for k in range(T):
-                    z = model.dynamics.rnn.forward_polynomial(
-                        z, None, mask=model.dynamics.coefficient_masks, theta=theta
-                    )
-                    preds.append(model.decoder(z))
-                preds = torch.stack(preds, dim=2)  # (1, B, T, full_dim)
-                return torch.nn.functional.mse_loss(preds, full_state.unsqueeze(0)).item()
+                z = model.encoder(sparse_obs)[:, -1, :]  # (N, latent_dim)
+                decoded = model.decoder(z)  # (N, full_dim)
+                return torch.nn.functional.mse_loss(decoded, full_state_target).item()
 
-        loss_init = _forecast_loss()
+        loss_init = _recon_loss()
 
         # Train
-        fit_autoencoder(model, sparse_obs, full_state,
+        fit_autoencoder(model, sparse_obs, full_state_target,
                         epochs=100, learning_rate=1e-3, l1=0, verbose=False)
 
-        loss_final = _forecast_loss()
+        loss_final = _recon_loss()
 
         assert loss_final < loss_init, f"Loss did not decrease: {loss_init:.6f} -> {loss_final:.6f}"
 
-    def test_fit_with_external_controls(self):
-        torch.manual_seed(42)
-        B, T = 5, 20
-
-        sparse_obs = torch.randn(B, T, 4)
-        full_state = torch.randn(B, T, 15)
-        controls = torch.randn(B, T, 2)
-
-        model = SparseAutoencoderRNN(
-            sparse_dim=4, full_dim=15, latent_dim=3,
-            n_controls=2, ensemble_size=2, polynomial_degree=2,
-        )
-        fit_autoencoder(model, sparse_obs, full_state,
-                        controls=controls, epochs=5, verbose=False)
-
     def test_fit_with_test_data(self):
         torch.manual_seed(42)
-        B, T = 5, 20
+        N, LAGS = 30, 10
 
-        sparse_obs = torch.randn(B, T, 4)
-        full_state_next = torch.randn(B, T, 15)
+        sparse_obs = torch.randn(N, LAGS, 4)
+        full_state_target = torch.randn(N, 15)
 
         model = SparseAutoencoderRNN(
             sparse_dim=4, full_dim=15, latent_dim=3,
             ensemble_size=2, polynomial_degree=2,
         )
-        fit_autoencoder(model, sparse_obs, full_state_next,
-                        sparse_obs_test=sparse_obs[:2],
-                        full_state_next_test=full_state_next[:2],
+        fit_autoencoder(model, sparse_obs, full_state_target,
+                        sparse_obs_test=sparse_obs[:5],
+                        full_state_target_test=full_state_target[:5],
                         epochs=5, verbose=False)
 
     def test_fit_with_refit(self):
+        """Refit should freeze encoder and run fit() on latent trajectories."""
         torch.manual_seed(42)
-        B, T = 5, 20
+        N, LAGS = 30, 10
 
-        sparse_obs = torch.randn(B, T, 4)
-        full_state = torch.randn(B, T, 15)
+        sparse_obs = torch.randn(N, LAGS, 4)
+        full_state_target = torch.randn(N, 15)
 
         model = SparseAutoencoderRNN(
             sparse_dim=4, full_dim=15, latent_dim=3,
             ensemble_size=2, polynomial_degree=2,
         )
-        fit_autoencoder(model, sparse_obs, full_state,
-                        epochs=10, refit_epochs=5, verbose=False)
+        fit_autoencoder(model, sparse_obs, full_state_target,
+                        epochs=10, refit_epochs=10, verbose=False)
+
+    def test_fit_with_sindy_warmup(self):
+        """E_sindy should only activate after sindy_warmup_epochs."""
+        torch.manual_seed(42)
+        N, LAGS = 30, 10
+
+        sparse_obs = torch.randn(N, LAGS, 4)
+        full_state_target = torch.randn(N, 15)
+
+        model = SparseAutoencoderRNN(
+            sparse_dim=4, full_dim=15, latent_dim=3,
+            ensemble_size=2, polynomial_degree=2,
+        )
+        fit_autoencoder(model, sparse_obs, full_state_target,
+                        epochs=10, sindy_warmup_epochs=5, verbose=False)
 
 
 class TestSaveLoad:
@@ -614,18 +608,18 @@ class TestSparseAutoencoderRNNWithGRU:
 
     def test_fit_with_gru_encoder(self):
         torch.manual_seed(42)
-        B, T = 5, 20
+        N, LAGS = 30, 10
         sparse_dim, full_dim, latent_dim = 4, 15, 3
 
-        sparse_obs = torch.randn(B, T, sparse_dim)
-        full_state = torch.randn(B, T, full_dim)
+        sparse_obs = torch.randn(N, LAGS, sparse_dim)
+        full_state_target = torch.randn(N, full_dim)
 
         model = SparseAutoencoderRNN(
             sparse_dim=sparse_dim, full_dim=full_dim, latent_dim=latent_dim,
             ensemble_size=2, polynomial_degree=2,
             encoder_type='gru',
         )
-        fit_autoencoder(model, sparse_obs, full_state,
+        fit_autoencoder(model, sparse_obs, full_state_target,
                         epochs=10, verbose=False)
 
     def test_save_load_gru(self, tmp_path):

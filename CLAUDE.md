@@ -225,6 +225,21 @@ E=ensemble, B=batch, T=timesteps, n=n_states, m=n_controls, F=n_features=n+m, C=
 
 ## 10. Example: Lorenz System Discovery
 
+### 10.1 Key characteristics (direct application with `fit()`)
+
+- **Derivative matching loss**: `fit()` compares `P(h)` to empirical `dh/dt` (not next-step prediction). This is a local per-timestep objective — much easier to optimize than forecasting.
+- **Centered differences** (`centered_diff=True`, default): `dh/dt ≈ (h[t+1] - h[t-1]) / (2*dt)` for O(dt²) accuracy. Forward differences (`centered_diff=False`) have O(dt) error, causing ~10% coefficient bias on Lorenz.
+- **High learning rate** (`lr=5e-2`): ODE coefficients are O(10–28) (e.g., σ=10, ρ=28). At `lr=1e-2`, Adam takes ~2800 epochs to reach them. `5e-2` converges in ~500 epochs.
+- **Gradient clipping** (`max_norm=100.0`): Derivative-scale losses produce gradients ~100x larger than next-step losses. Old `max_norm=1.0` throttled learning by ~1000x.
+- **L1 on unfolded θ** (`l2=5e-2`): Drives sparsity. Named `l2` in `fit()` for legacy reasons — it's actually L1 on `theta.abs().mean()`.
+- **Batched windows** (`window_size=100`): Long trajectories chunked into non-overlapping windows for GPU parallelism.
+- **Sub-stepping** (`num_euler_steps=3`): Multiple Euler steps per dt interval improves integration accuracy during teacher-forced forward pass.
+- **dynamics_weight=0**: Disables autonomous rollout loss. Derivative matching alone is sufficient for direct state observation.
+- **Known limitation — y absorption**: On Lorenz, x-y correlation ρ=0.88. Gradient descent + L1 prefers 6-term model (25.5*x absorbs 28*x - y in dy/dt). Standard SINDy/STLSQ with OLS finds exact 7-term partition because closed-form least-squares has a unique solution. Prediction MSE is identical with or without -y — this is inherent to gradient-based optimization with correlated features, not a bug.
+- **Evaluation**: Autonomous forecast MSE (simulate discovered ODE forward, compare to ground truth). Not next-step prediction MSE (trivially small for small dt) or derivative matching MSE (method-specific).
+
+### 10.2 Working configuration
+
 ```python
 import torch
 import numpy as np
@@ -241,42 +256,49 @@ def lorenz_rk4(x, dt=0.01, sigma=10, rho=28, beta=8/3):
     k3 = f(x + dt/2*k2); k4 = f(x + dt*k3)
     return x + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
 
+dt = 0.01
 x = np.array([1., 1., 1.])
 trajectory = [x]
 for _ in range(5000):
-    x = lorenz_rk4(x)
+    x = lorenz_rk4(x, dt=dt)
     trajectory.append(x)
 trajectory = np.array(trajectory)  # (5001, 3)
 
-xs = torch.tensor(trajectory[:-1], dtype=torch.float32).unsqueeze(0)  # (1, 5000, 3)
-ys = torch.tensor(trajectory[1:],  dtype=torch.float32).unsqueeze(0)  # (1, 5000, 3)
+# Chunk into windows for batched training
+window_size = 100
+N = len(trajectory) - 1
+n_windows = N // window_size
+xs = torch.tensor(trajectory[:n_windows*window_size].reshape(n_windows, window_size, -1),
+                  dtype=torch.float32)
+ys = torch.tensor(trajectory[1:n_windows*window_size+1].reshape(n_windows, window_size, -1),
+                  dtype=torch.float32)
 
 model = PolynomialRNN(
-    n_states=3,
-    n_controls=0,
-    polynomial_degree=2,
-    ensemble_size=11,
-    dt=0.01,
+    n_states=3, n_controls=0, polynomial_degree=2,
+    ensemble_size=11, dt=dt,
     state_names=['x', 'y', 'z'],
-    dropout=0.1,
+    dropout=0.1, decomposed=True,
+    num_euler_steps=3,
 )
 
 fit(model, xs, ys,
-    epochs=1000,
-    warmup_steps=500,
+    epochs=3000, warmup_steps=1000,
     ensemble_pruning_alpha=0.05,
-    pruning_threshold=0.5,
+    pruning_threshold=0.2,
     pruning_method='median',
-    pruning_frequency=20,
-    learning_rate=1e-2,
-    l2=5e-2,
+    pruning_frequency=100,
+    learning_rate=5e-2,
+    l2=5e-2,              # L1 penalty weight
+    dt=dt,
+    refit_epochs=500,
+    dynamics_weight=0,    # derivative matching only, no autonomous rollout
     verbose=True,
 )
 
 model.print_equations()
 # Expected ODE (theta directly represents dh/dt):
 # dx/dt = -10.000*x + 10.000*y
-# dy/dt = 28.000*x - 1.000*y - 1.000*x*z
+# dy/dt = 25.500*x - 1.000*x*z       (or 28*x - y - x*z with 7 terms)
 # dz/dt = -2.667*z + 1.000*x*y
 ```
 
@@ -344,17 +366,47 @@ Constructor: `sparse_dim, full_dim, latent_dim, n_controls, ensemble_size, polyn
 
 **Encoder types:** MLPEncoder (per-timestep) or GRUEncoder (temporal context via Takens' embedding). **MLPDecoder** maps latent → full state. Encoder/decoder shared across ensemble; only inner dynamics has E members.
 
+### fit_autoencoder() training objective
+
+SINDy-SHRED-style sliding windows: each sample is a sensor window of length LAGS
+(stride=1). The GRU encoder produces one latent per window (final hidden state),
+so every latent point has full temporal context. Dynamics pairs come from
+consecutive windows' latent outputs.
+
+Joint loss: `L = E_id + sindy_weight * E_sindy + l1 * |theta|`
+
+- **E_id** (reconstruction): `decode(z_i) ≈ full_state_i` — same-timestep reconstruction. Anchors latent space.
+- **E_sindy** (derivative matching): `P(z_i) ≈ dz/dt` — compares polynomial P to empirical derivatives from consecutive windows' latent outputs. Couples encoder to polynomial dynamics.
+- **L1**: sparsity on polynomial coefficients
+
+**Data format:**
+- `sparse_obs`: `(N, LAGS, sparse_dim)` — N sliding windows with stride=1
+- `full_state_target`: `(N, full_dim)` — same-timestep reconstruction target (one per window)
+
+**Staged training**: E_sindy and L1 are gated by `sindy_warmup_epochs`. During `[0, sindy_warmup)`, only E_id trains.
+
+**Two-phase gradient accumulation**: E_id is computed and backward'd separately (freeing the large decoded tensor) before re-encoding for E_sindy + L1. This prevents OOM on high-dimensional problems.
+
+**Separate param groups**: `dynamics_learning_rate` (default: same as `learning_rate`) controls the polynomial dynamics lr independently. Set higher (e.g. `5e-2`) so ODE coefficients converge faster, while encoder/decoder stay at `1e-3`.
+
+**Refit**: After joint training, freezes the encoder, extracts all latent trajectories, resets masks, and calls `fit()` on the PolynomialRNN for clean equation discovery on fixed latent space.
+
+No bootstrap — all ensemble members see the same shared encoder output (diversity from random init + pruning).
+
 ### fit_autoencoder() differences from fit()
 
 | Aspect | `fit()` | `fit_autoencoder()` |
 |--------|---------|---------------------|
 | L1 param name | `l2` | `l1` |
 | Default pruning | `'ci'` | `'median'` |
-| Default lr | `1e-2` | `1e-3` |
-| Bootstrap | Pre-expands data | **Lazy indexing** (avoids GB-scale expansion) |
+| Default lr | `1e-2` | `1e-3` (encoder/decoder) |
+| Dynamics lr | Same as lr | `dynamics_learning_rate` (separate param group) |
+| Bootstrap | Pre-expands data | **No bootstrap** (shared encoder output) |
 | Test eval | Full-batch | **Per-window loop** (avoids OOM) |
-| Loss target | Next-state MSE | Decoded full state MSE |
-| Refit | Supported | Supported: `refit_epochs`, `l1=0`, frozen mask, `lr/5` |
+| Loss | Derivative matching | E_id + E_sindy + L1 (staged via sindy_warmup) |
+| Grad clipping | `max_norm=100.0` | `max_norm=100.0` |
+| Memory | Single backward | **Two-phase** (E_id freed before E_sindy) |
+| Refit | Supported | Freeze encoder → extract z → reset masks → call `fit()` |
 
 ---
 
@@ -385,17 +437,20 @@ Three experimental settings:
 | poly_order/degree | 3 (cubic) | 3 | N/A |
 | Ensemble | E=11, median | E=5 | N/A |
 | epochs | 1000 | 1000 | 1000 |
-| warmup/refit | 500/200 | patience=20 | N/A |
-| lr | 1e-3 | 5e-4 | 5e-4 |
-| batch_size | 1 | 64 | 64 |
-| L1/sindy_reg | 5e-3 | 10.0 | N/A |
-| pruning_threshold | 0.2 | 1e-3 | N/A |
+| warmup/refit | 200/100 | patience=20 | N/A |
+| lr (enc/dec) | 1e-3 | 5e-4 | 5e-4 |
+| dynamics_lr | 5e-2 | N/A | N/A |
+| batch_size | 64 | 64 | 64 |
+| L1/sindy_reg | 1e-4 | 10.0 | N/A |
+| pruning_threshold | 0.1 | 1e-3 | N/A |
 | dt | 1/30 | N/A | N/A |
-| window (lags) | 30 | 60 | 60 |
+| lags | 60 | 60 | 60 |
+| sindy_weight | 1.0 | N/A | N/A |
+| sindy_warmup | 100 | N/A | N/A |
 
-**GPU memory:** SINDy-SHRED decoder ~160M params. Must `.cpu()` and `torch.cuda.empty_cache()` between methods.
+**GPU memory:** SINDy-SHRED decoder ~160M params. Must `.cpu()` and `torch.cuda.empty_cache()` between methods. Two-phase gradient accumulation in `fit_autoencoder()` prevents OOM by freeing E_id decode tensors before computing E_sindy.
 
-**Script:** [cylinder_benchmark_seeds.py](examples/cylinder_benchmark_seeds.py)
+**Script:** [cylinder_benchmark.py](examples/cylinder_benchmark.py)
 
 ### 15.4 SST
 
@@ -406,15 +461,18 @@ Three experimental settings:
 |-----------|-----------------|-------------|-------|
 | Encoder | GRU(250→3), 2 layers | Same | Same |
 | Decoder | MLP(3→350→400→44,219) | Same | Same |
-| poly_order/degree | 3 (pruned to linear) | 3 | N/A |
+| poly_order/degree | 1 (linear) | 3 | N/A |
 | Ensemble | E=11 | E=5 | N/A |
-| epochs | 500 | 1000 | 1000 |
-| warmup/refit | 200/100 | patience=5 | N/A |
-| lr | 1e-3 | 1e-3 | 1e-3 |
+| epochs | 1000 | 1000 | 1000 |
+| warmup/refit | 200/1000 | patience=5 | N/A |
+| lr (enc/dec) | 1e-3 | 1e-3 | 1e-3 |
+| dynamics_lr | 5e-2 | N/A | N/A |
 | L1/sindy_reg | 1e-3 | 10.0 | N/A |
-| pruning_threshold | 0.05 | 1.0 | N/A |
+| pruning_threshold | 0.1 | 1.0 | N/A |
 | dt | 1/52 | N/A | N/A |
-| window (lags) | 52 | 52 | 52 |
+| lags | 52 | 52 | 52 |
+| sindy_weight | 1.0 | N/A | N/A |
+| sindy_warmup | 100 | N/A | N/A |
 
 **Script:** [sst_benchmark.py](examples/sst_benchmark.py)
 

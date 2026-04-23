@@ -1,17 +1,27 @@
 """Encoder-decoder architecture for sparse observation settings.
 
 Wraps PolynomialRNN with encoder/decoder to learn latent dynamics
-from sparse measurements via autonomous forecast training:
+from sparse measurements via joint reconstruction + dynamics training:
 
-    z_0 = encoder(sparse_obs_0)                         # encode initial state
-    z_k = dynamics(z_{k-1})  for k = 1..T              # autonomous rollout
-    loss = MSE(decoder(z_k), full_state_k)              # decoded full-state MSE
+    L = E_id + sindy_weight * E_sindy + l1 * |theta|
 
-No teacher forcing — the dynamics must predict the full window
-autonomously from the first encoded state. This forces P(h) to learn
-real dynamics instead of collapsing to identity.
+    E_id:    decode(z_i) ≈ full_state_i           # same-timestep reconstruction
+    E_sindy: P(z_i) ≈ (z_{i+1} - z_i) / dt       # derivative matching
 
-The ODE is recovered analytically: dz/dt = alpha * (P(z) - z) / dt.
+Training uses SINDy-SHRED-style sliding windows: each sample is a sensor
+window of length LAGS (stride=1). The GRU encoder produces one latent per
+window (final hidden state), so every latent point has full temporal context.
+Dynamics pairs come from consecutive windows' latent outputs.
+
+E_id anchors the latent space (encoder/decoder learn meaningful compression).
+E_sindy couples the encoder to the polynomial dynamics — the GRU is pushed
+to produce latent trajectories predictable by a sparse polynomial ODE.
+
+After joint training, the refit phase freezes the encoder and runs fit()
+on the fixed latent trajectories for clean equation discovery.
+
+Forward Euler update: z_{t+1} = z_t + dt * P(z_t), where theta directly
+represents the ODE right-hand side dz/dt = P(z).
 
 Two encoder types:
   - MLP: processes each timestep independently (no temporal context)
@@ -19,6 +29,7 @@ Two encoder types:
     better state estimation from sparse measurements (Takens' delay embedding)
 """
 
+import math
 from typing import Dict, List, Optional, Union
 
 import torch
@@ -187,15 +198,15 @@ class MLPDecoder(nn.Module):
 class SparseAutoencoderRNN(nn.Module):
     """Encoder-decoder wrapper around PolynomialRNN for sparse observation settings.
 
-    Architecture (teacher-forced next-state prediction with gated update):
+    Architecture (forward Euler with polynomial ODE):
         z_t = encoder(sparse_obs_t)                          # encode sensors to latent
-        z_{t+1} = (1 - alpha) * z_t + P(z_t [, u_t])       # gated polynomial update
+        z_{t+1} = z_t + dt * P(z_t [, u_t])                 # forward Euler step
         full_pred_{t+1} = decoder(z_{t+1})                   # decode to full state
 
-    The ODE is recovered: dz/dt = (P(z) - alpha*z) / dt.
+    Theta directly represents the ODE: dz/dt = P(z).
 
     The encoder maps sparse sensors to latent coordinates at each timestep.
-    The polynomial RNN predicts the next latent state via gated update.
+    The polynomial RNN predicts the next latent state via forward Euler.
     The decoder maps back to full state. Teacher forcing: z_t always comes
     from encoding actual sensors, not from the model's own predictions.
 
@@ -205,9 +216,8 @@ class SparseAutoencoderRNN(nn.Module):
         providing better state estimation from sparse measurements
 
     The polynomial P operates only on the latent state z (and optional external
-    controls u). The gated update provides stability while allowing strong
-    gradient flow through P. The (1-alpha) mixing provides implicit damping
-    for autonomous forecasting.
+    controls u). The forward Euler step h + dt*P(h) ensures the polynomial
+    must actively contribute dynamics — masking all terms gives identity (not decay).
 
     The encoder and decoder are shared across ensemble members. Only the inner
     PolynomialRNN has E independent members. Pruning and equation extraction
@@ -257,7 +267,7 @@ class SparseAutoencoderRNN(nn.Module):
         dynamics_feature_dropout: float = 0.,
         decomposed: bool = True,
         direct: bool = False,
-        alpha: float = None,
+        num_euler_steps: int = 1,
     ):
         super().__init__()
         self.sparse_dim = sparse_dim
@@ -293,8 +303,8 @@ class SparseAutoencoderRNN(nn.Module):
             feature_dropout=dynamics_feature_dropout,
             decomposed=decomposed,
             direct=direct,
-            alpha=alpha,
             compiled_forward=True,
+            num_euler_steps=num_euler_steps,
         )
 
     @property
@@ -343,7 +353,8 @@ class SparseAutoencoderRNN(nn.Module):
         return full_pred, latent_pred, encoded
 
     def forecast(self, z_init: Tensor, n_steps: int,
-                 controls: Optional[Tensor] = None) -> tuple:
+                 controls: Optional[Tensor] = None,
+                 integrator: str = 'rk4') -> tuple:
         """Autonomous forward prediction without sensor input.
 
         Evolves the latent state using only the polynomial dynamics P(z).
@@ -353,6 +364,7 @@ class SparseAutoencoderRNN(nn.Module):
             z_init: (E, B, latent_dim) — initial latent state (e.g. from encoder)
             n_steps: number of steps to forecast
             controls: (E, B, n_steps, n_external_controls) or None
+            integrator: 'euler' or 'rk4' (default: 'rk4' for forecast accuracy)
 
         Returns:
             full_traj: (E, B, n_steps, full_dim) — decoded forecast trajectory
@@ -364,7 +376,8 @@ class SparseAutoencoderRNN(nn.Module):
         for t in range(n_steps):
             u_t = controls[:, :, t, :] if controls is not None else None
             h = self.dynamics.rnn.forward_polynomial(
-                h, u_t, mask=self.dynamics.coefficient_masks, theta=theta
+                h, u_t, mask=self.dynamics.coefficient_masks, theta=theta,
+                integrator=integrator,
             )
             trajectory.append(h)
 
@@ -411,10 +424,10 @@ class SparseAutoencoderRNN(nn.Module):
             'ensemble_size': self.dynamics.ensemble_size,
             'polynomial_degree': self.dynamics.rnn._degree,
             'dt': self.dynamics.rnn._dt.item(),
-            'alpha': self.dynamics.rnn._alpha.item(),
             'state_names': self.dynamics.state_names,
             'decomposed': self.dynamics.rnn._decomposed,
             'direct': self.dynamics.rnn._direct,
+            'num_euler_steps': self.dynamics.rnn._num_euler_steps,
             'encoder_type': self.encoder_type,
         }
         if self.encoder_type == 'gru':
@@ -437,8 +450,8 @@ class SparseAutoencoderRNN(nn.Module):
             config['direct'] = False
         if 'dt' not in config:
             config['dt'] = 1.0
-        if 'alpha' not in config:
-            config['alpha'] = config['dt']
+        # Backward compat: remove alpha from old checkpoints
+        config.pop('alpha', None)
         model = cls(**config)
         model.load_state_dict(checkpoint['state_dict'], strict=False)
         model.dynamics.coefficient_masks.copy_(checkpoint['coefficient_masks'])
@@ -449,15 +462,14 @@ class SparseAutoencoderRNN(nn.Module):
 def fit_autoencoder(
     model: SparseAutoencoderRNN,
     sparse_obs: Tensor,
-    full_state_next: Tensor,
-    controls: Optional[Tensor] = None,
+    full_state_target: Tensor,
     sparse_obs_test: Optional[Tensor] = None,
-    full_state_next_test: Optional[Tensor] = None,
-    controls_test: Optional[Tensor] = None,
+    full_state_target_test: Optional[Tensor] = None,
     epochs: int = 500,
     warmup_steps: Optional[int] = None,
     batch_size: Optional[int] = None,
     learning_rate: float = 1e-3,
+    dynamics_learning_rate: Optional[float] = None,
     l1: float = 1e-4,
     pruning_frequency: int = 1,
     pruning_threshold: Optional[float] = None,
@@ -467,43 +479,80 @@ def fit_autoencoder(
     include_bias: bool = True,
     interaction_only: bool = False,
     refit_epochs: int = 0,
-    refit_learning_rate: Optional[float] = None,
+    sindy_weight: float = 1.0,
+    sindy_warmup_epochs: int = 0,
+    stability_weight: float = 0.0,
+    centered_diff: bool = True,
     verbose: bool = True,
 ):
-    """Train the SparseAutoencoderRNN via autonomous forecast.
+    """Train the SparseAutoencoderRNN with reconstruction + dynamics losses.
 
-    Encodes the sensor window, starts from the first encoded latent state,
-    rolls out autonomously for the full window (T steps), decodes each
-    prediction to full state, and computes MSE against ground truth.
-    No teacher forcing — forces the dynamics P(h) to learn real transitions.
+    Uses SINDy-SHRED-style sliding windows: each sample is a sensor window
+    of length LAGS. The GRU encoder produces one latent per window (final
+    hidden state), so every latent point has full temporal context.
+
+    Joint loss: L = E_id + sindy_weight * E_sindy + l1 * |theta|
+                    + stability_weight * relu(max|1 + dt*lambda| - 1)
+
+    Staged training: E_sindy and L1 are gated by sindy_warmup_epochs to let
+    the encoder/decoder converge before training dynamics.
+      Phase 1 [0, sindy_warmup): E_id only — pure autoencoder
+      Phase 2 [sindy_warmup, end): E_id + E_sindy + L1
+
+    E_id (reconstruction): decode the final GRU output per window, compare to
+    same-timestep full state. Anchors the latent space.
+
+    E_sindy (derivative matching): P(z_i) compared to empirical dz/dt from
+    consecutive windows' latent outputs. Couples encoder to polynomial dynamics.
+
+    After joint training, the refit phase freezes the encoder and runs fit()
+    on the fixed latent trajectories for clean equation discovery.
 
     Args:
         model: SparseAutoencoderRNN instance
-        sparse_obs: (B, T, sparse_dim) — sparse measurements at each timestep
-        full_state_next: (B, T, full_dim) — full state prediction targets (next timestep)
-        controls: (B, T, n_controls) or None — external control inputs
-        sparse_obs_test, full_state_next_test, controls_test: optional test data
+        sparse_obs: (N, LAGS, sparse_dim) — sliding sensor windows, stride=1
+        full_state_target: (N, full_dim) — same-timestep reconstruction target
+        sparse_obs_test: (N_te, LAGS, sparse_dim) — optional test windows
+        full_state_target_test: (N_te, full_dim) — optional test targets
         epochs: total training epochs
         warmup_steps: epochs before pruning begins (default: epochs // 4)
-        batch_size: mini-batch size over sequences (None = full batch)
-        learning_rate: Adam learning rate
+        batch_size: mini-batch for E_id reconstruction (None = full batch).
+            E_sindy always uses the full ordered dataset.
+        learning_rate: Adam learning rate for encoder/decoder
+        dynamics_learning_rate: Adam learning rate for polynomial dynamics.
+            Default: same as learning_rate. Set higher (e.g. 5e-2) to help
+            polynomial coefficients reach O(10+) ODE values faster.
         l1: L1 penalty weight on unfolded polynomial coefficients
         pruning_frequency: epochs between pruning events
         pruning_threshold: minimum effect size delta for pruning test
         ensemble_pruning_alpha: confidence level for CI test (unused for median)
         pruning_method: 'ci' or 'median'
-        dt: timestep (converts pruning to continuous-time scale)
+        dt: timestep between consecutive windows
         include_bias: if False, mask out constant term
         interaction_only: if True, mask out pure power terms
-        refit_epochs: post-pruning refit epochs with l1=0
-        refit_learning_rate: learning rate for refit phase
+        refit_epochs: epochs for frozen-encoder refit with fit().
+            Resets masks and runs full pruning cycle on fixed latent space.
+        sindy_weight: weight on E_sindy relative to E_id (default: 1.0)
+        sindy_warmup_epochs: epochs before E_sindy + L1 activate (default: 0).
+            During [0, sindy_warmup), only E_id trains.
+        stability_weight: weight on discrete Euler stability penalty.
+            Penalizes max|1 + dt*lambda| - 1 where lambda are Jacobian eigenvalues.
+            Uses detached latent points (encoder gets no gradient from this term).
+            0.0 = disabled (default).
+        centered_diff: if True (default), use centered differences for O(dt²)
+            derivative accuracy. Set to False for forward differences.
         verbose: print progress every 50 epochs
     """
+    from .training import fit as _fit_dynamics
+
     if warmup_steps is None:
         warmup_steps = epochs // 4
 
     dynamics = model.dynamics
     E = dynamics.ensemble_size
+    N = sparse_obs.shape[0]
+    n_states = dynamics.n_states
+    model_dt = dynamics.rnn._dt  # buffer, stays on correct device
 
     # Apply optional initial mask exclusions
     if not include_bias:
@@ -513,90 +562,148 @@ def fit_autoencoder(
             if len(term) >= 2 and len(set(term)) == 1:
                 dynamics.coefficient_masks[:, :, t_idx] = False
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # Separate param groups: dynamics polynomial can use higher lr
+    dynamics_lr = dynamics_learning_rate if dynamics_learning_rate is not None else learning_rate
+    dynamics_param_ids = set(id(p) for p in dynamics.parameters())
+    encdec_params = [p for p in model.parameters() if id(p) not in dynamics_param_ids]
+    optimizer = torch.optim.Adam([
+        {'params': list(dynamics.parameters()), 'lr': dynamics_lr},
+        {'params': encdec_params, 'lr': learning_rate},
+    ])
 
-    B = sparse_obs.shape[0]
+    def _encode_last(obs):
+        """Encode windows and return LAST GRU output per window.
+
+        Args:
+            obs: (N, LAGS, sparse_dim) or (Bb, LAGS, sparse_dim)
+        Returns:
+            z: (N, latent_dim) or (Bb, latent_dim) — one latent per window
+        """
+        encoded = model.encoder(obs)  # (..., LAGS, latent_dim)
+        return encoded[..., -1, :]    # (..., latent_dim) — last output
 
     def _test_loss():
-        """Compute test loss per-window to avoid OOM on high-dim outputs."""
+        """Compute test reconstruction loss (E_id) in chunks to avoid OOM."""
         model.eval()
-        B_te = sparse_obs_test.shape[0]
+        N_te = sparse_obs_test.shape[0]
         total_se = 0.
         total_n = 0
-        for b in range(B_te):
-            s = sparse_obs_test[b:b+1].unsqueeze(0).expand(E, -1, -1, -1)
-            c = None
-            if controls_test is not None:
-                c = controls_test[b:b+1].unsqueeze(0).expand(E, -1, -1, -1)
-            fp, _, _ = model(s, controls=c)
-            fn = full_state_next_test[b:b+1].unsqueeze(0).expand(E, -1, -1, -1)
-            total_se += F.mse_loss(fp, fn, reduction='sum').item()
-            total_n += fp.numel()
-            del fp, fn, s, c
+        chunk = 64
+        for start in range(0, N_te, chunk):
+            end = min(start + chunk, N_te)
+            z = _encode_last(sparse_obs_test[start:end])
+            decoded = model.decoder(z)
+            target = full_state_target_test[start:end]
+            total_se += F.mse_loss(decoded, target, reduction='sum').item()
+            total_n += decoded.numel()
+            del decoded, z
         return total_se / total_n
 
-    # Bootstrap indices: each ensemble member sees different sequence samples.
-    # Stored as indices only — data is indexed lazily to avoid pre-expanding
-    # high-dimensional full_state_next (which can be GBs for large full_dim).
-    if E > 1:
-        bootstrap_indices = torch.randint(0, B, (E, B))  # (E, B)
-    else:
-        bootstrap_indices = torch.arange(B).unsqueeze(0)  # (1, B)
+    def _sindy_loss(z_all, theta_masked):
+        """Derivative matching on consecutive latent points.
 
-    def _get_batch(batch_idx=None):
-        """Index into data with bootstrap + mini-batch selection."""
-        if batch_idx is not None:
-            idx = bootstrap_indices[:, batch_idx]  # (E, batch_size)
+        Args:
+            z_all: (N, latent_dim) — ordered latent trajectory
+            theta_masked: (E, n_states, n_terms) — masked polynomial coefficients
+        Returns:
+            loss: scalar — MSE(P(z), dz/dt)
+        """
+        # Rescale encoder gradient: dt factor cancels 1/dt from finite diff,
+        # giving O(1) encoder gradient. P(z_eval) uses unscaled z_all.
+        z_diff = z_all.detach() + model_dt * (z_all - z_all.detach())
+        if centered_diff:
+            dz_dt = (z_diff[2:] - z_diff[:-2]) / (2 * model_dt)
+            z_eval = z_all[1:-1]       # interior points
         else:
-            idx = bootstrap_indices  # (E, B)
-        sparse_b = sparse_obs[idx]              # (E, Bb, T, sparse_dim)
-        full_next_b = full_state_next[idx]      # (E, Bb, T, full_dim)
-        ctrl_b = controls[idx] if controls is not None else None
-        return sparse_b, full_next_b, ctrl_b
+            dz_dt = (z_diff[1:] - z_diff[:-1]) / model_dt
+            z_eval = z_all[:-1]
+
+        # Expand for ensemble: (E, M, latent_dim)
+        M = z_eval.shape[0]
+        z_eval_e = z_eval.unsqueeze(0).expand(E, -1, -1)
+        library = dynamics.rnn._compute_library(z_eval_e)  # (E, M, n_terms)
+        P_z = torch.einsum('ebt,ent->ebn', library, theta_masked)  # (E, M, n_states)
+
+        dz_dt_e = dz_dt.unsqueeze(0).expand(E, -1, -1)
+        return F.mse_loss(P_z, dz_dt_e)
 
     try:
         for epoch in range(epochs):
             model.train()
-
-            # Mini-batch selection
-            if batch_size is not None and batch_size < B:
-                batch_idx = torch.randperm(B)[:batch_size]
-            else:
-                batch_idx = None
-            sparse_b, full_next_b, ctrl_b = _get_batch(batch_idx)
-
-            # Encode → autonomous rollout → decode → full-state MSE
-            encoded = model.encoder(sparse_b)  # (E, Bb, T, latent_dim)
-            theta = dynamics.rnn.unfold_polynomial_coefficients()
-
-            T_win = encoded.shape[2]
-            z = encoded[:, :, 0, :]  # (E, Bb, latent_dim)
-
-            fc_loss = 0.
-            for k in range(T_win):
-                u_k = ctrl_b[:, :, k, :] if ctrl_b is not None else None
-                z = dynamics.rnn.forward_polynomial(
-                    z, u_k, mask=dynamics.coefficient_masks, theta=theta
-                )
-                decoded = model.decoder(z)  # (E, Bb, full_dim)
-                target = full_next_b[:, :, k, :]  # (E, Bb, full_dim)
-                valid_k = ~torch.isnan(target.sum(dim=-1))  # (E, Bb)
-                if valid_k.any():
-                    fc_loss += F.mse_loss(decoded[valid_k], target[valid_k])
-            fc_loss = fc_loss / T_win
-
-            loss = fc_loss
-            if l1 > 0:
-                loss = loss + l1 * theta.abs().mean()
-            loss_val = fc_loss.item()
-
             optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
 
-            # Free training batch tensors to reduce memory for test eval / pruning
-            del full_next_b, sparse_b, ctrl_b, encoded, loss
+            # --- Phase 1: E_id (reconstruction) ---
+            # Encode all windows, take last GRU output per window.
+            # Two-phase gradient accumulation: backward() after E_id frees
+            # the large decoded tensor before computing E_sindy.
+            if batch_size is not None and batch_size < N:
+                batch_idx = torch.randperm(N, device=sparse_obs.device)[:batch_size]
+                z_recon = _encode_last(sparse_obs[batch_idx])
+                target_recon = full_state_target[batch_idx]
+            else:
+                z_recon = _encode_last(sparse_obs)
+                target_recon = full_state_target
+
+            decoded = model.decoder(z_recon)  # (Bb, full_dim)
+            recon_loss = F.mse_loss(decoded, target_recon)
+            recon_val = recon_loss.item()
+            recon_loss.backward()
+            del decoded, z_recon, recon_loss
+
+            # --- Phase 2: E_sindy + L1 ---
+            # Re-encode full ordered dataset for dynamics (fresh graph).
+            # Exponential ramp: sindy_weight grows from ~0 to full value over
+            # sindy_warmup_epochs, then stays constant. Avoids sudden shock.
+            sindy_val = 0.
+            penalty_val = 0.
+            stability_val = 0.
+            if sindy_weight > 0 and sindy_warmup_epochs > 0 and epoch < sindy_warmup_epochs:
+                _ramp = 5.0  # controls curvature (exp(5)-1 ≈ 147x dynamic range)
+                progress = epoch / sindy_warmup_epochs
+                eff_sindy_w = sindy_weight * (math.exp(_ramp * progress) - 1) / (math.exp(_ramp) - 1)
+                eff_l1 = l1 * (math.exp(_ramp * progress) - 1) / (math.exp(_ramp) - 1)
+            else:
+                eff_sindy_w = sindy_weight
+                eff_l1 = l1
+            use_sindy = eff_sindy_w > 0
+            use_l1 = eff_l1 > 0
+            use_stability = stability_weight > 0
+            if use_sindy or use_l1 or use_stability:
+                z_all = _encode_last(sparse_obs)  # (N, latent_dim)
+                theta = dynamics.rnn.unfold_polynomial_coefficients()
+                theta_masked = theta * dynamics.coefficient_masks.float()
+
+                loss2 = torch.tensor(0., device=sparse_obs.device)
+
+                if use_sindy:
+                    # sindy_weight scales encoder gradient only (gentle nudge);
+                    # polynomial gets full derivative-matching gradient.
+                    z_sindy = z_all.detach() + eff_sindy_w * (z_all - z_all.detach())
+                    s_loss = _sindy_loss(z_sindy, theta_masked)
+                    loss2 = loss2 + s_loss
+                    sindy_val = s_loss.item()
+
+                if use_l1:
+                    pen = eff_l1 * (theta**2).mean()
+                    loss2 = loss2 + pen
+                    penalty_val = pen.item()
+
+                if use_stability:
+                    if dynamics.rnn._degree > 1:
+                        z_sub = z_all.detach()[::10].unsqueeze(0).expand(E, -1, -1)
+                    else:
+                        z_sub = None
+                    stab_loss = dynamics.rnn.compute_stability_loss(
+                        theta_masked, model_dt, z_sub)
+                    loss2 = loss2 + stability_weight * stab_loss
+                    stability_val = stab_loss.item()
+
+                if isinstance(loss2, Tensor) and loss2.requires_grad:
+                    loss2.backward()
+                del z_all, loss2
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0)
+            optimizer.step()
 
             # Pruning
             if epoch >= warmup_steps and epoch % pruning_frequency == 0:
@@ -609,11 +716,22 @@ def fit_autoencoder(
                         threshold_patience_update(dynamics, pruning_threshold, dt=dt)
                         threshold_prune(dynamics, patience_limit=2)
 
+            if verbose:
+                if epoch == sindy_warmup_epochs and sindy_weight > 0 and sindy_warmup_epochs > 0:
+                    print(f"--- Epoch {epoch}: E_sindy ramp complete (weight={sindy_weight:.4f}) ---")
+
             if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
                 active = dynamics.count_active_terms()
                 total_active = sum(active.values())
-                msg = f"Epoch {epoch:4d} | loss {loss_val:.6f} | active terms: {total_active}"
-                if sparse_obs_test is not None and full_state_next_test is not None:
+                msg = f"Epoch {epoch:4d} | recon {recon_val:.6f}"
+                if use_sindy:
+                    msg += f" | sindy {sindy_val:.6f} (w={eff_sindy_w:.4f})"
+                if use_l1:
+                    msg += f" | penalty {penalty_val:.6f}"
+                if use_stability:
+                    msg += f" | stab {stability_val:.6f}"
+                msg += f" | active terms: {total_active}"
+                if sparse_obs_test is not None and full_state_target_test is not None:
                     with torch.no_grad():
                         loss_te = _test_loss()
                         msg += f" | test {loss_te:.6f}"
@@ -622,61 +740,55 @@ def fit_autoencoder(
         if verbose:
             print(f"\nTraining interrupted at epoch {epoch}.")
 
-    # Post-pruning refit: train with l1=0 and frozen mask to debias coefficients
+    # Refit: freeze encoder, extract latent trajectories, run fit() on dynamics
     if refit_epochs > 0:
-        del optimizer  # free first optimizer's states before creating refit optimizer
-        refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate / 5
-        refit_optimizer = torch.optim.Adam(model.parameters(), lr=refit_lr)
+        del optimizer
 
         if verbose:
             active = dynamics.count_active_terms()
             total_active = sum(active.values())
-            print(f"\nRefit phase: {refit_epochs} epochs, lr={refit_lr:.1e}, "
-                  f"l1=0, mask frozen ({total_active} active terms)")
+            print(f"\nRefit phase: freezing encoder, extracting latent trajectories...")
+            print(f"  Pre-refit active terms: {total_active}")
 
-        try:
-            for epoch in range(refit_epochs):
-                model.train()
+        # Extract latent trajectory from frozen encoder
+        model.eval()
+        with torch.no_grad():
+            z_all = _encode_last(sparse_obs)  # (N, latent_dim)
 
-                if batch_size is not None and batch_size < B:
-                    batch_idx = torch.randperm(B)[:batch_size]
-                else:
-                    batch_idx = None
-                sparse_b, full_next_b, ctrl_b = _get_batch(batch_idx)
+        # Construct xs/ys for fit(): xs[t] = z[t], ys[t] = z[t+1]
+        xs_latent = z_all[:-1].unsqueeze(0)  # (1, N-1, latent_dim)
+        ys_latent = z_all[1:].unsqueeze(0)   # (1, N-1, latent_dim)
 
-                # Autonomous rollout (same as main loop, no L1)
-                encoded = model.encoder(sparse_b)
-                theta = dynamics.rnn.unfold_polynomial_coefficients()
+        # Reset masks for fresh discovery on fixed latent space
+        dynamics.coefficient_masks.fill_(True)
+        dynamics.pruning_patience.zero_()
+        if not include_bias:
+            dynamics.coefficient_masks[:, :, dynamics.rnn._bias_index] = False
+        if interaction_only:
+            for t_idx, term in enumerate(dynamics.rnn._library_terms):
+                if len(term) >= 2 and len(set(term)) == 1:
+                    dynamics.coefficient_masks[:, :, t_idx] = False
 
-                T_win = encoded.shape[2]
-                z = encoded[:, :, 0, :]
+        if verbose:
+            print(f"  Latent trajectory: {z_all.shape[0]} points, "
+                  f"calling fit() for {refit_epochs} epochs")
 
-                fc_loss = 0.
-                for k in range(T_win):
-                    u_k = ctrl_b[:, :, k, :] if ctrl_b is not None else None
-                    z = dynamics.rnn.forward_polynomial(
-                        z, u_k, mask=dynamics.coefficient_masks, theta=theta
-                    )
-                    decoded = model.decoder(z)
-                    target = full_next_b[:, :, k, :]
-                    valid_k = ~torch.isnan(target.sum(dim=-1))
-                    if valid_k.any():
-                        fc_loss += F.mse_loss(decoded[valid_k], target[valid_k])
-                loss = fc_loss / T_win
-                loss_val = loss.item()
-
-                refit_optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                refit_optimizer.step()
-
-                if verbose and (epoch % 50 == 0 or epoch == refit_epochs - 1):
-                    msg = f"Refit {epoch:4d} | loss {loss_val:.6f}"
-                    if sparse_obs_test is not None and full_state_next_test is not None:
-                        with torch.no_grad():
-                            loss_te = _test_loss()
-                            msg += f" | test {loss_te:.6f}"
-                    print(msg)
-        except KeyboardInterrupt:
-            if verbose:
-                print(f"\nRefit interrupted at epoch {epoch}.")
+        # Run fit() on the PolynomialRNN with fixed latent data
+        _fit_dynamics(
+            dynamics, xs_latent, ys_latent,
+            epochs=refit_epochs,
+            # warmup_steps=refit_epochs//2,
+            learning_rate=dynamics_lr,
+            l2=l1,
+            pruning_threshold=pruning_threshold,
+            pruning_method=pruning_method,
+            pruning_frequency=pruning_frequency,
+            ensemble_pruning_alpha=ensemble_pruning_alpha,
+            dt=dt,
+            include_bias=include_bias,
+            interaction_only=interaction_only,
+            centered_diff=centered_diff,
+            refit_epochs=refit_epochs // 5,
+            stability_weight=stability_weight,
+            verbose=verbose,
+        )

@@ -94,11 +94,11 @@ def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degre
     torch.testing.assert_close(h_no_mask, h_with_mask, rtol=1e-5, atol=1e-6)
 
 
-def test_masking_removes_polynomial_gives_decay():
-    """Masking ALL polynomial terms gives h[t+1] = (1-alpha)*h[t] (decay).
+def test_masking_removes_polynomial_gives_identity():
+    """Masking ALL polynomial terms gives h[t+1] = h[t] (identity).
 
-    With gated parameterization, masking all terms zeros P(h), so
-    h[t+1] = (1-alpha) * h[t] + alpha * 0 = (1-alpha) * h[t].
+    With Euler parameterization, masking all terms zeros P(h), so
+    h[t+1] = h[t] + dt * 0 = h[t].
     """
     torch.manual_seed(99)
 
@@ -116,10 +116,8 @@ def test_masking_removes_polynomial_gives_decay():
 
     h_next = model.rnn.forward_polynomial(h, None, mask=mask)
 
-    # For dimension 0, the result should be (1 - alpha) * h[:, :, 0]
-    alpha = model.rnn._alpha.item()
-    expected = (1 - alpha) * h[:, :, 0]
-    torch.testing.assert_close(h_next[:, :, 0], expected, rtol=1e-5, atol=1e-6)
+    # For dimension 0, the result should be h[:, :, 0] (identity)
+    torch.testing.assert_close(h_next[:, :, 0], h[:, :, 0], rtol=1e-5, atol=1e-6)
 
 
 def test_sequence_forward_shape():
@@ -139,8 +137,8 @@ def test_sequence_forward_shape():
 
 
 @pytest.mark.parametrize("dt", [0.01, 0.1, 1.0])
-def test_gated_update(dt):
-    """Verify that the gated update h[t+1] = (1-alpha)*h + alpha*P(h) is correct."""
+def test_euler_update(dt):
+    """Verify that the Euler update h[t+1] = h + dt * P(h) is correct."""
     torch.manual_seed(42)
 
     model = PolynomialRNN(
@@ -153,14 +151,61 @@ def test_gated_update(dt):
 
     h_next = model.rnn._forward_impl(h, None)
 
-    # Compute expected: (1 - alpha) * h + alpha * P(h)
-    alpha = model.rnn._alpha
+    # Compute expected: h + dt * P(h)
     if model.rnn._direct:
         x_t = h
         library = model.rnn._compute_library(x_t)
         P_h = torch.einsum('ebt,ent->ebn', library, model.rnn.theta)
     else:
         P_h = model.rnn.projection(h)
-    expected = (1 - alpha) * h + alpha * P_h
+    expected = h + dt * P_h
 
     torch.testing.assert_close(h_next, expected, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("num_euler_steps", [1, 3, 5])
+def test_sub_stepping(num_euler_steps):
+    """Verify that sub-stepping divides dt correctly."""
+    torch.manual_seed(42)
+    dt = 0.3
+
+    model = PolynomialRNN(
+        n_states=2, n_controls=0, ensemble_size=1,
+        polynomial_degree=2, dt=dt, compiled_forward=False,
+        num_euler_steps=num_euler_steps,
+    )
+
+    E, B = 1, 3
+    h = torch.randn(E, B, 2)
+
+    # Sub-stepped forward
+    h_sub = model.rnn._forward_impl(h, None)
+
+    # Manual sub-stepping
+    h_manual = h.clone()
+    dt_sub = dt / num_euler_steps
+    for _ in range(num_euler_steps):
+        P_h = model.rnn.projection(h_manual)
+        h_manual = h_manual + dt_sub * P_h
+
+    torch.testing.assert_close(h_sub, h_manual, rtol=1e-5, atol=1e-6)
+
+
+def test_sub_stepping_invariant():
+    """forward == forward_polynomial still holds with sub-stepping."""
+    torch.manual_seed(42)
+
+    model = PolynomialRNN(
+        n_states=2, n_controls=0, ensemble_size=3,
+        polynomial_degree=2, dt=0.1, compiled_forward=False,
+        num_euler_steps=3,
+    )
+
+    E, B = 3, 4
+    h = torch.randn(E, B, 2)
+
+    h_standard = model.rnn._forward_impl(h, None)
+    mask = torch.ones(E, 2, model.rnn._n_library_terms, dtype=torch.bool)
+    h_poly = model.rnn.forward_polynomial(h, None, mask=mask)
+
+    torch.testing.assert_close(h_standard, h_poly, rtol=1e-4, atol=1e-5)

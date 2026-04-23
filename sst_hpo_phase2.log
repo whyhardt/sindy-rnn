@@ -1,0 +1,1849 @@
+SST HPO Phase 2
+======================================================================
+Device: cuda
+Configs: 8
+Data: (1400, 44219)
+Test frames: 1081-1399 (319)
+Training windows: 1001
+
+######################################################################
+[1/8] sw1_dlr01: sw=1.0, dlr=0.1, warm=2500, ep=5000, refit=3000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020728 | sindy 10.701654 (w=0.0007) | active terms: 12 | test 0.022401
+Epoch  100 | recon 0.018098 | sindy 12.306597 (w=0.0015) | active terms: 12 | test 0.020268
+Epoch  150 | recon 0.015167 | sindy 10.639659 (w=0.0024) | active terms: 12 | test 0.018203
+Epoch  200 | recon 0.014165 | sindy 7.162807 (w=0.0033) | active terms: 12 | test 0.016073
+Epoch  250 | recon 0.011927 | sindy 6.153251 (w=0.0044) | active terms: 12 | test 0.015201
+Epoch  300 | recon 0.011471 | sindy 5.184414 (w=0.0056) | active terms: 12 | test 0.014582
+Epoch  350 | recon 0.010667 | sindy 4.286812 (w=0.0069) | active terms: 12 | test 0.014564
+Epoch  400 | recon 0.011784 | sindy 3.723277 (w=0.0083) | active terms: 12 | test 0.013605
+Epoch  450 | recon 0.009510 | sindy 3.459480 (w=0.0099) | active terms: 12 | test 0.013779
+Epoch  500 | recon 0.009909 | sindy 3.382802 (w=0.0117) | active terms: 12 | test 0.013541
+Epoch  550 | recon 0.010319 | sindy 3.466734 (w=0.0136) | active terms: 12 | test 0.013456
+Epoch  600 | recon 0.009687 | sindy 3.664773 (w=0.0157) | active terms: 12 | test 0.013270
+Epoch  650 | recon 0.009827 | sindy 3.410515 (w=0.0181) | active terms: 12 | test 0.013279
+Epoch  700 | recon 0.009599 | sindy 3.557753 (w=0.0207) | active terms: 12 | test 0.012754
+Epoch  750 | recon 0.010097 | sindy 3.239838 (w=0.0236) | active terms: 12 | test 0.013234
+Epoch  800 | recon 0.011658 | sindy 2.537263 (w=0.0268) | active terms: 12 | test 0.015482
+Epoch  850 | recon 0.014172 | sindy 3.441066 (w=0.0303) | active terms: 12 | test 0.016435
+Epoch  900 | recon 0.015769 | sindy 6.253603 (w=0.0343) | active terms: 12 | test 0.020015
+Epoch  950 | recon 0.020838 | sindy 8.370340 (w=0.0386) | active terms: 12 | test 0.029083
+Epoch 1000 | recon 0.018456 | sindy 9.550001 (w=0.0433) | active terms: 12 | test 0.022838
+Epoch 1050 | recon 0.014582 | sindy 9.778398 (w=0.0486) | active terms: 12 | test 0.019523
+Epoch 1100 | recon 0.021794 | sindy 3.688771 (w=0.0544) | active terms: 12 | test 0.024512
+Epoch 1150 | recon 0.019910 | sindy 0.444976 (w=0.0609) | active terms: 12 | test 0.025848
+Epoch 1200 | recon 0.017503 | sindy 0.157030 (w=0.0680) | active terms: 12 | test 0.025252
+Epoch 1250 | recon 0.017296 | sindy 0.128664 (w=0.0759) | active terms: 12 | test 0.020127
+Epoch 1300 | recon 0.016056 | sindy 0.097659 (w=0.0845) | active terms: 12 | test 0.019220
+Epoch 1350 | recon 0.016869 | sindy 0.081081 (w=0.0942) | active terms: 12 | test 0.019383
+Epoch 1400 | recon 0.016535 | sindy 0.073969 (w=0.1048) | active terms: 12 | test 0.021000
+Epoch 1450 | recon 0.012705 | sindy 0.061259 (w=0.1165) | active terms: 12 | test 0.017635
+Epoch 1500 | recon 0.012574 | sindy 0.058751 (w=0.1295) | active terms: 12 | test 0.017727
+Epoch 1550 | recon 0.014101 | sindy 0.053843 (w=0.1438) | active terms: 12 | test 0.020645
+Epoch 1600 | recon 0.014070 | sindy 0.046734 (w=0.1596) | active terms: 12 | test 0.025285
+Epoch 1650 | recon 0.014098 | sindy 0.040085 (w=0.1771) | active terms: 12 | test 0.022058
+Epoch 1700 | recon 0.014179 | sindy 0.037654 (w=0.1965) | active terms: 12 | test 0.019521
+Epoch 1750 | recon 0.013773 | sindy 0.034837 (w=0.2179) | active terms: 12 | test 0.017869
+Epoch 1800 | recon 0.013210 | sindy 0.033216 (w=0.2415) | active terms: 12 | test 0.019575
+Epoch 1850 | recon 0.012820 | sindy 0.029825 (w=0.2676) | active terms: 12 | test 0.019471
+Epoch 1900 | recon 0.013720 | sindy 0.023272 (w=0.2965) | active terms: 12 | test 0.018761
+Epoch 1950 | recon 0.013505 | sindy 0.023290 (w=0.3283) | active terms: 12 | test 0.021100
+Epoch 2000 | recon 0.012792 | sindy 0.019962 (w=0.3636) | active terms: 12 | test 0.019157
+Epoch 2050 | recon 0.014585 | sindy 0.020984 (w=0.4025) | active terms: 12 | test 0.025233
+Epoch 2100 | recon 0.013359 | sindy 0.019437 (w=0.4456) | active terms: 12 | test 0.026299
+Epoch 2150 | recon 0.013524 | sindy 0.018373 (w=0.4932) | active terms: 12 | test 0.019035
+Epoch 2200 | recon 0.016468 | sindy 0.018808 (w=0.5458) | active terms: 12 | test 0.024028
+Epoch 2250 | recon 0.013645 | sindy 0.018885 (w=0.6039) | active terms: 12 | test 0.023625
+Epoch 2300 | recon 0.015071 | sindy 0.018536 (w=0.6681) | active terms: 12 | test 0.027242
+Epoch 2350 | recon 0.014868 | sindy 0.019770 (w=0.7391) | active terms: 12 | test 0.020763
+Epoch 2400 | recon 0.015919 | sindy 0.023493 (w=0.8175) | active terms: 12 | test 0.022831
+Epoch 2450 | recon 0.017834 | sindy 0.029979 (w=0.9042) | active terms: 12 | test 0.025933
+--- Epoch 2500: E_sindy ramp complete (weight=1.0000) ---
+Epoch 2500 | recon 0.018332 | sindy 0.042521 (w=1.0000) | active terms: 12 | test 0.027128
+Epoch 2550 | recon 0.023617 | sindy 0.074860 (w=1.0000) | active terms: 12 | test 0.030712
+Epoch 2600 | recon 0.023736 | sindy 0.245050 (w=1.0000) | active terms: 12 | test 0.037548
+Epoch 2650 | recon 0.025364 | sindy 0.755287 (w=1.0000) | active terms: 12 | test 0.035980
+Epoch 2700 | recon 0.020919 | sindy 0.504889 (w=1.0000) | active terms: 12 | test 0.035301
+Epoch 2750 | recon 0.026149 | sindy 0.593578 (w=1.0000) | active terms: 12 | test 0.035447
+Epoch 2800 | recon 0.019938 | sindy 0.574396 (w=1.0000) | active terms: 12 | test 0.044018
+Epoch 2850 | recon 0.025065 | sindy 0.411378 (w=1.0000) | active terms: 12 | test 0.044295
+Epoch 2900 | recon 0.021738 | sindy 0.528930 (w=1.0000) | active terms: 12 | test 0.039570
+Epoch 2950 | recon 0.021866 | sindy 0.342698 (w=1.0000) | active terms: 12 | test 0.031544
+Epoch 3000 | recon 0.019012 | sindy 0.316535 (w=1.0000) | active terms: 12 | test 0.033119
+Epoch 3050 | recon 0.022158 | sindy 0.251526 (w=1.0000) | active terms: 12 | test 0.040192
+Epoch 3100 | recon 0.021443 | sindy 0.301140 (w=1.0000) | active terms: 12 | test 0.032315
+Epoch 3150 | recon 0.020966 | sindy 0.318115 (w=1.0000) | active terms: 12 | test 0.025840
+Epoch 3200 | recon 0.021743 | sindy 0.360748 (w=1.0000) | active terms: 12 | test 0.031340
+Epoch 3250 | recon 0.023737 | sindy 0.497720 (w=1.0000) | active terms: 12 | test 0.034387
+Epoch 3300 | recon 0.027687 | sindy 0.757689 (w=1.0000) | active terms: 12 | test 0.034152
+Epoch 3350 | recon 0.031507 | sindy 1.313914 (w=1.0000) | active terms: 12 | test 0.044935
+Epoch 3400 | recon 0.031973 | sindy 6.580646 (w=1.0000) | active terms: 12 | test 0.036690
+Epoch 3450 | recon 0.021284 | sindy 23.281454 (w=1.0000) | active terms: 12 | test 0.019418
+Epoch 3500 | recon 0.022253 | sindy 30.721096 (w=1.0000) | active terms: 12 | test 0.023790
+Epoch 3550 | recon 0.021244 | sindy 28.220667 (w=1.0000) | active terms: 12 | test 0.022478
+Epoch 3600 | recon 0.021658 | sindy 49.804317 (w=1.0000) | active terms: 12 | test 0.024136
+Epoch 3650 | recon 0.020064 | sindy 40.242191 (w=1.0000) | active terms: 12 | test 0.023534
+Epoch 3700 | recon 0.019689 | sindy 42.690125 (w=1.0000) | active terms: 12 | test 0.022364
+Epoch 3750 | recon 0.017829 | sindy 38.925167 (w=1.0000) | active terms: 12 | test 0.021679
+Epoch 3800 | recon 0.023649 | sindy 40.413960 (w=1.0000) | active terms: 12 | test 0.028130
+Epoch 3850 | recon 0.027213 | sindy 32.533169 (w=1.0000) | active terms: 12 | test 0.034807
+Epoch 3900 | recon 0.049816 | sindy 12.971493 (w=1.0000) | active terms: 12 | test 0.052728
+Epoch 3950 | recon 0.049515 | sindy 1.321582 (w=1.0000) | active terms: 12 | test 0.051759
+Epoch 4000 | recon 0.046507 | sindy 0.756836 (w=1.0000) | active terms: 12 | test 0.051198
+Epoch 4050 | recon 0.047092 | sindy 0.620426 (w=1.0000) | active terms: 12 | test 0.050972
+Epoch 4100 | recon 0.048130 | sindy 0.602346 (w=1.0000) | active terms: 12 | test 0.051111
+Epoch 4150 | recon 0.043971 | sindy 0.526193 (w=1.0000) | active terms: 12 | test 0.050718
+Epoch 4200 | recon 0.050760 | sindy 0.502333 (w=1.0000) | active terms: 12 | test 0.051559
+Epoch 4250 | recon 0.043865 | sindy 0.464645 (w=1.0000) | active terms: 12 | test 0.050560
+Epoch 4300 | recon 0.044318 | sindy 0.514912 (w=1.0000) | active terms: 12 | test 0.051680
+Epoch 4350 | recon 0.046473 | sindy 0.440657 (w=1.0000) | active terms: 12 | test 0.050128
+Epoch 4400 | recon 0.044883 | sindy 0.430812 (w=1.0000) | active terms: 12 | test 0.050532
+Epoch 4450 | recon 0.042206 | sindy 0.477288 (w=1.0000) | active terms: 12 | test 0.050435
+Epoch 4500 | recon 0.048495 | sindy 0.403748 (w=1.0000) | active terms: 12 | test 0.049867
+Epoch 4550 | recon 0.046271 | sindy 0.399039 (w=1.0000) | active terms: 12 | test 0.049835
+Epoch 4600 | recon 0.047874 | sindy 0.410770 (w=1.0000) | active terms: 12 | test 0.049788
+Epoch 4650 | recon 0.052329 | sindy 0.379249 (w=1.0000) | active terms: 12 | test 0.050827
+Epoch 4700 | recon 0.052498 | sindy 0.360971 (w=1.0000) | active terms: 12 | test 0.049714
+Epoch 4750 | recon 0.048090 | sindy 0.337734 (w=1.0000) | active terms: 12 | test 0.049934
+Epoch 4800 | recon 0.047623 | sindy 0.362801 (w=1.0000) | active terms: 12 | test 0.050328
+Epoch 4850 | recon 0.046164 | sindy 0.325371 (w=1.0000) | active terms: 12 | test 0.049780
+Epoch 4900 | recon 0.051491 | sindy 0.345164 (w=1.0000) | active terms: 12 | test 0.049702
+Epoch 4950 | recon 0.045523 | sindy 0.309318 (w=1.0000) | active terms: 12 | test 0.049965
+Epoch 4999 | recon 0.049734 | sindy 0.320780 (w=1.0000) | active terms: 12 | test 0.051847
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 0.024273 | active terms: 12
+Epoch   50 | deriv 0.023148 | active terms: 12
+Epoch  100 | deriv 0.022865 | active terms: 12
+Epoch  150 | deriv 0.022817 | active terms: 12
+Epoch  200 | deriv 0.022764 | active terms: 12
+Epoch  250 | deriv 0.022704 | active terms: 12
+Epoch  300 | deriv 0.022640 | active terms: 12
+Epoch  350 | deriv 0.022571 | active terms: 12
+Epoch  400 | deriv 0.022500 | active terms: 12
+Epoch  450 | deriv 0.022427 | active terms: 12
+Epoch  500 | deriv 0.022353 | active terms: 12
+Epoch  550 | deriv 0.022278 | active terms: 12
+Epoch  600 | deriv 0.022202 | active terms: 12
+Epoch  650 | deriv 0.022127 | active terms: 12
+Epoch  700 | deriv 0.022054 | active terms: 12
+Epoch  750 | deriv 0.021981 | active terms: 12
+Epoch  800 | deriv 0.021910 | active terms: 12
+Epoch  850 | deriv 0.021841 | active terms: 12
+Epoch  900 | deriv 0.021774 | active terms: 12
+Epoch  950 | deriv 0.021710 | active terms: 12
+Epoch 1000 | deriv 0.021649 | active terms: 12
+Epoch 1050 | deriv 0.021590 | active terms: 12
+Epoch 1100 | deriv 0.021534 | active terms: 12
+Epoch 1150 | deriv 0.021481 | active terms: 12
+Epoch 1200 | deriv 0.021432 | active terms: 12
+Epoch 1250 | deriv 0.021385 | active terms: 12
+Epoch 1300 | deriv 0.021341 | active terms: 12
+Epoch 1350 | deriv 0.021300 | active terms: 12
+Epoch 1400 | deriv 0.021262 | active terms: 12
+Epoch 1450 | deriv 0.021226 | active terms: 12
+Epoch 1500 | deriv 0.021194 | active terms: 12
+Epoch 1550 | deriv 0.021163 | active terms: 12
+Epoch 1600 | deriv 0.021135 | active terms: 12
+Epoch 1650 | deriv 0.021233 | active terms: 12
+Epoch 1700 | deriv 0.021089 | active terms: 12
+Epoch 1750 | deriv 0.021067 | active terms: 12
+Epoch 1800 | deriv 0.021049 | active terms: 12
+Epoch 1850 | deriv 0.021118 | active terms: 12
+Epoch 1900 | deriv 0.021090 | active terms: 12
+Epoch 1950 | deriv 0.021036 | active terms: 12
+Epoch 2000 | deriv 0.022059 | active terms: 12
+Epoch 2050 | deriv 0.021005 | active terms: 12
+Epoch 2100 | deriv 0.021007 | active terms: 12
+Epoch 2150 | deriv 0.020962 | active terms: 12
+Epoch 2200 | deriv 0.020949 | active terms: 12
+Epoch 2250 | deriv 0.021117 | active terms: 12
+Epoch 2300 | deriv 0.021019 | active terms: 12
+Epoch 2350 | deriv 0.020967 | active terms: 12
+Epoch 2400 | deriv 0.020921 | active terms: 12
+Epoch 2450 | deriv 0.021020 | active terms: 12
+Epoch 2500 | deriv 0.020952 | active terms: 12
+Epoch 2550 | deriv 0.020974 | active terms: 12
+Epoch 2600 | deriv 0.020948 | active terms: 12
+Epoch 2650 | deriv 0.020957 | active terms: 12
+Epoch 2700 | deriv 0.020987 | active terms: 12
+Epoch 2750 | deriv 0.020964 | active terms: 12
+Epoch 2800 | deriv 0.021058 | active terms: 12
+Epoch 2850 | deriv 0.020892 | active terms: 12
+Epoch 2900 | deriv 0.020875 | active terms: 12
+Epoch 2950 | deriv 0.020913 | active terms: 12
+Epoch 2999 | deriv 0.020861 | active terms: 12
+
+Refit phase: 600 epochs, lr=2.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.020861
+Refit   50 | deriv 0.020844
+Refit  100 | deriv 0.020837
+Refit  150 | deriv 0.020836
+Refit  200 | deriv 0.020835
+Refit  250 | deriv 0.020833
+Refit  300 | deriv 0.020832
+Refit  350 | deriv 0.020830
+Refit  400 | deriv 0.020828
+Refit  450 | deriv 0.020826
+Refit  500 | deriv 0.020824
+Refit  550 | deriv 0.020822
+Refit  599 | deriv 0.020820
+
+============================================================
+RESULT [sw1_dlr01]
+  Recon: 10.92%  |  Forecast: DIVERGED
+  Active terms: 12  |  Time: 109s
+  dz1/dt = 3.799 + 10.612*z1 + 20.231*z2 + 44.348*z3
+  dz2/dt = -0.990 + 7.374*z1 - 4.214*z2 + 2.692*z3
+  dz3/dt = 8.338 - 49.225*z1 + 35.148*z2 - 6.716*z3
+============================================================
+
+
+######################################################################
+[2/8] sw1_dlr01_w1k: sw=1.0, dlr=0.1, warm=1000, ep=5000, refit=3000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020745 | sindy 10.628772 (w=0.0019) | active terms: 12 | test 0.022435
+Epoch  100 | recon 0.018394 | sindy 11.440509 (w=0.0044) | active terms: 12 | test 0.020243
+Epoch  150 | recon 0.015442 | sindy 6.464535 (w=0.0076) | active terms: 12 | test 0.018776
+Epoch  200 | recon 0.012548 | sindy 4.999815 (w=0.0117) | active terms: 12 | test 0.015324
+Epoch  250 | recon 0.011383 | sindy 4.614690 (w=0.0169) | active terms: 12 | test 0.014760
+Epoch  300 | recon 0.011161 | sindy 3.869985 (w=0.0236) | active terms: 12 | test 0.014564
+Epoch  350 | recon 0.010561 | sindy 3.202986 (w=0.0323) | active terms: 12 | test 0.014841
+Epoch  400 | recon 0.012410 | sindy 3.041152 (w=0.0433) | active terms: 12 | test 0.014658
+Epoch  450 | recon 0.009795 | sindy 3.854768 (w=0.0576) | active terms: 12 | test 0.014329
+Epoch  500 | recon 0.024719 | sindy 5.766881 (w=0.0759) | active terms: 12 | test 0.028038
+Epoch  550 | recon 0.019487 | sindy 7.296004 (w=0.0993) | active terms: 12 | test 0.021891
+Epoch  600 | recon 0.016680 | sindy 8.476773 (w=0.1295) | active terms: 12 | test 0.023709
+Epoch  650 | recon 0.024963 | sindy 10.370855 (w=0.1682) | active terms: 12 | test 0.026691
+Epoch  700 | recon 0.034387 | sindy 10.654355 (w=0.2179) | active terms: 12 | test 0.039162
+Epoch  750 | recon 0.029982 | sindy 9.340984 (w=0.2817) | active terms: 12 | test 0.037499
+Epoch  800 | recon 0.033901 | sindy 8.225443 (w=0.3636) | active terms: 12 | test 0.041426
+Epoch  850 | recon 0.034428 | sindy 7.308699 (w=0.4688) | active terms: 12 | test 0.043256
+Epoch  900 | recon 0.027295 | sindy 8.688110 (w=0.6039) | active terms: 12 | test 0.039903
+Epoch  950 | recon 0.031055 | sindy 8.467734 (w=0.7773) | active terms: 12 | test 0.037054
+--- Epoch 1000: E_sindy ramp complete (weight=1.0000) ---
+Epoch 1000 | recon 0.026616 | sindy 8.936201 (w=1.0000) | active terms: 12 | test 0.037702
+Epoch 1050 | recon 0.037962 | sindy 5.771814 (w=1.0000) | active terms: 12 | test 0.038274
+Epoch 1100 | recon 0.034874 | sindy 5.943735 (w=1.0000) | active terms: 12 | test 0.036333
+Epoch 1150 | recon 0.027757 | sindy 5.671413 (w=1.0000) | active terms: 12 | test 0.034655
+Epoch 1200 | recon 0.024379 | sindy 5.123190 (w=1.0000) | active terms: 12 | test 0.039129
+Epoch 1250 | recon 0.029410 | sindy 4.749660 (w=1.0000) | active terms: 12 | test 0.033907
+Epoch 1300 | recon 0.026031 | sindy 4.540726 (w=1.0000) | active terms: 12 | test 0.034981
+Epoch 1350 | recon 0.028999 | sindy 4.478827 (w=1.0000) | active terms: 12 | test 0.033236
+Epoch 1400 | recon 0.027420 | sindy 4.699107 (w=1.0000) | active terms: 12 | test 0.034097
+Epoch 1450 | recon 0.022254 | sindy 4.109513 (w=1.0000) | active terms: 12 | test 0.035293
+Epoch 1500 | recon 0.027806 | sindy 3.786246 (w=1.0000) | active terms: 12 | test 0.036967
+Epoch 1550 | recon 0.023706 | sindy 4.285869 (w=1.0000) | active terms: 12 | test 0.031573
+Epoch 1600 | recon 0.028001 | sindy 4.021513 (w=1.0000) | active terms: 12 | test 0.035127
+Epoch 1650 | recon 0.030780 | sindy 3.593384 (w=1.0000) | active terms: 12 | test 0.036869
+Epoch 1700 | recon 0.023484 | sindy 3.734661 (w=1.0000) | active terms: 12 | test 0.034151
+Epoch 1750 | recon 0.025282 | sindy 3.962459 (w=1.0000) | active terms: 12 | test 0.029982
+Epoch 1800 | recon 0.023819 | sindy 3.765088 (w=1.0000) | active terms: 12 | test 0.032255
+Epoch 1850 | recon 0.024160 | sindy 4.021951 (w=1.0000) | active terms: 12 | test 0.028867
+Epoch 1900 | recon 0.021471 | sindy 3.822846 (w=1.0000) | active terms: 12 | test 0.027116
+Epoch 1950 | recon 0.021128 | sindy 3.854940 (w=1.0000) | active terms: 12 | test 0.027532
+Epoch 2000 | recon 0.020758 | sindy 4.145446 (w=1.0000) | active terms: 12 | test 0.025709
+Epoch 2050 | recon 0.021236 | sindy 4.137827 (w=1.0000) | active terms: 12 | test 0.028562
+Epoch 2100 | recon 0.021458 | sindy 4.171529 (w=1.0000) | active terms: 12 | test 0.028602
+Epoch 2150 | recon 0.021610 | sindy 4.459761 (w=1.0000) | active terms: 12 | test 0.030931
+Epoch 2200 | recon 0.031195 | sindy 4.486778 (w=1.0000) | active terms: 12 | test 0.027944
+Epoch 2250 | recon 0.018657 | sindy 4.339134 (w=1.0000) | active terms: 12 | test 0.027397
+Epoch 2300 | recon 0.020722 | sindy 4.214314 (w=1.0000) | active terms: 12 | test 0.031949
+Epoch 2350 | recon 0.020216 | sindy 3.984036 (w=1.0000) | active terms: 12 | test 0.031801
+Epoch 2400 | recon 0.023073 | sindy 3.826250 (w=1.0000) | active terms: 12 | test 0.031843
+Epoch 2450 | recon 0.028027 | sindy 3.722077 (w=1.0000) | active terms: 12 | test 0.031022
+Epoch 2500 | recon 0.023459 | sindy 3.314920 (w=1.0000) | active terms: 12 | test 0.033856
+Epoch 2550 | recon 0.022755 | sindy 3.835026 (w=1.0000) | active terms: 12 | test 0.032407
+Epoch 2600 | recon 0.027516 | sindy 3.110375 (w=1.0000) | active terms: 12 | test 0.032381
+Epoch 2650 | recon 0.032884 | sindy 2.982613 (w=1.0000) | active terms: 12 | test 0.031865
+Epoch 2700 | recon 0.018859 | sindy 3.378765 (w=1.0000) | active terms: 12 | test 0.029608
+Epoch 2750 | recon 0.028584 | sindy 2.821649 (w=1.0000) | active terms: 12 | test 0.031820
+Epoch 2800 | recon 0.020580 | sindy 3.194405 (w=1.0000) | active terms: 12 | test 0.030562
+Epoch 2850 | recon 0.024957 | sindy 3.054509 (w=1.0000) | active terms: 12 | test 0.031051
+Epoch 2900 | recon 0.026021 | sindy 2.555011 (w=1.0000) | active terms: 12 | test 0.032485
+Epoch 2950 | recon 0.029338 | sindy 3.194197 (w=1.0000) | active terms: 12 | test 0.030660
+Epoch 3000 | recon 0.029697 | sindy 2.921160 (w=1.0000) | active terms: 12 | test 0.033868
+Epoch 3050 | recon 0.031799 | sindy 2.821787 (w=1.0000) | active terms: 12 | test 0.033333
+Epoch 3100 | recon 0.029804 | sindy 3.061255 (w=1.0000) | active terms: 12 | test 0.037844
+Epoch 3150 | recon 0.027138 | sindy 3.293542 (w=1.0000) | active terms: 12 | test 0.041214
+Epoch 3200 | recon 0.023493 | sindy 3.448118 (w=1.0000) | active terms: 12 | test 0.038576
+Epoch 3250 | recon 0.028126 | sindy 3.433616 (w=1.0000) | active terms: 12 | test 0.041350
+Epoch 3300 | recon 0.024530 | sindy 3.236335 (w=1.0000) | active terms: 12 | test 0.046403
+Epoch 3350 | recon 0.036047 | sindy 3.113675 (w=1.0000) | active terms: 12 | test 0.050278
+Epoch 3400 | recon 0.023065 | sindy 3.158512 (w=1.0000) | active terms: 12 | test 0.043705
+Epoch 3450 | recon 0.028662 | sindy 2.765030 (w=1.0000) | active terms: 12 | test 0.044726
+Epoch 3500 | recon 0.028446 | sindy 3.007454 (w=1.0000) | active terms: 12 | test 0.045153
+Epoch 3550 | recon 0.029443 | sindy 2.641636 (w=1.0000) | active terms: 12 | test 0.043106
+Epoch 3600 | recon 0.034078 | sindy 2.584524 (w=1.0000) | active terms: 12 | test 0.044196
+Epoch 3650 | recon 0.023381 | sindy 2.529609 (w=1.0000) | active terms: 12 | test 0.043270
+Epoch 3700 | recon 0.020133 | sindy 2.846339 (w=1.0000) | active terms: 12 | test 0.023736
+Epoch 3750 | recon 0.018190 | sindy 2.924548 (w=1.0000) | active terms: 12 | test 0.031549
+Epoch 3800 | recon 0.026337 | sindy 2.431936 (w=1.0000) | active terms: 12 | test 0.030734
+Epoch 3850 | recon 0.029946 | sindy 3.631098 (w=1.0000) | active terms: 12 | test 0.032305
+Epoch 3900 | recon 0.028315 | sindy 2.796665 (w=1.0000) | active terms: 12 | test 0.034208
+Epoch 3950 | recon 0.025292 | sindy 4.860311 (w=1.0000) | active terms: 12 | test 0.027771
+Epoch 4000 | recon 0.025013 | sindy 12.526461 (w=1.0000) | active terms: 12 | test 0.025520
+Epoch 4050 | recon 0.025052 | sindy 9.629315 (w=1.0000) | active terms: 12 | test 0.021647
+Epoch 4100 | recon 0.016620 | sindy 11.497664 (w=1.0000) | active terms: 12 | test 0.014626
+Epoch 4150 | recon 0.012334 | sindy 8.174301 (w=1.0000) | active terms: 12 | test 0.015713
+Epoch 4200 | recon 0.026145 | sindy 3.990219 (w=1.0000) | active terms: 12 | test 0.029826
+Epoch 4250 | recon 0.028441 | sindy 3.724971 (w=1.0000) | active terms: 12 | test 0.032951
+Epoch 4300 | recon 0.028059 | sindy 4.623950 (w=1.0000) | active terms: 12 | test 0.032851
+Epoch 4350 | recon 0.031073 | sindy 5.612456 (w=1.0000) | active terms: 12 | test 0.032442
+Epoch 4400 | recon 0.031108 | sindy 5.580108 (w=1.0000) | active terms: 12 | test 0.032698
+Epoch 4450 | recon 0.026686 | sindy 5.550845 (w=1.0000) | active terms: 12 | test 0.031342
+Epoch 4500 | recon 0.025342 | sindy 5.049257 (w=1.0000) | active terms: 12 | test 0.029760
+Epoch 4550 | recon 0.028387 | sindy 4.516999 (w=1.0000) | active terms: 12 | test 0.029863
+Epoch 4600 | recon 0.023199 | sindy 4.356184 (w=1.0000) | active terms: 12 | test 0.032030
+Epoch 4650 | recon 0.029684 | sindy 4.316633 (w=1.0000) | active terms: 12 | test 0.029035
+Epoch 4700 | recon 0.021454 | sindy 3.985976 (w=1.0000) | active terms: 12 | test 0.027971
+Epoch 4750 | recon 0.025874 | sindy 3.958111 (w=1.0000) | active terms: 12 | test 0.027156
+Epoch 4800 | recon 0.024509 | sindy 4.246838 (w=1.0000) | active terms: 12 | test 0.027171
+Epoch 4850 | recon 0.024738 | sindy 4.093494 (w=1.0000) | active terms: 12 | test 0.027167
+Epoch 4900 | recon 0.019006 | sindy 3.872545 (w=1.0000) | active terms: 12 | test 0.028277
+Epoch 4950 | recon 0.021984 | sindy 3.968382 (w=1.0000) | active terms: 12 | test 0.027063
+Epoch 4999 | recon 0.022993 | sindy 3.922135 (w=1.0000) | active terms: 12 | test 0.026949
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 2.542305 | active terms: 12
+Epoch   50 | deriv 2.524096 | active terms: 12
+Epoch  100 | deriv 2.523949 | active terms: 12
+Epoch  150 | deriv 2.523947 | active terms: 12
+Epoch  200 | deriv 2.523947 | active terms: 12
+Epoch  250 | deriv 2.523947 | active terms: 12
+Epoch  300 | deriv 2.523947 | active terms: 12
+Epoch  350 | deriv 2.523947 | active terms: 12
+Epoch  400 | deriv 2.523947 | active terms: 12
+Epoch  450 | deriv 2.523947 | active terms: 12
+Epoch  500 | deriv 2.523947 | active terms: 12
+Epoch  550 | deriv 2.523947 | active terms: 12
+Epoch  600 | deriv 2.523947 | active terms: 12
+Epoch  650 | deriv 2.523947 | active terms: 12
+Epoch  700 | deriv 2.523947 | active terms: 12
+Epoch  750 | deriv 2.523948 | active terms: 12
+Epoch  800 | deriv 2.523954 | active terms: 12
+Epoch  850 | deriv 2.523947 | active terms: 12
+Epoch  900 | deriv 2.523947 | active terms: 12
+Epoch  950 | deriv 2.523969 | active terms: 12
+Epoch 1000 | deriv 2.524006 | active terms: 12
+Epoch 1050 | deriv 2.523957 | active terms: 12
+Epoch 1100 | deriv 2.523952 | active terms: 12
+Epoch 1150 | deriv 2.523947 | active terms: 12
+Epoch 1200 | deriv 2.523948 | active terms: 12
+Epoch 1250 | deriv 2.524009 | active terms: 12
+Epoch 1300 | deriv 2.523947 | active terms: 12
+Epoch 1350 | deriv 2.523952 | active terms: 12
+Epoch 1400 | deriv 2.523984 | active terms: 12
+Epoch 1450 | deriv 2.523980 | active terms: 12
+Epoch 1500 | deriv 2.523949 | active terms: 12
+Epoch 1550 | deriv 2.524016 | active terms: 12
+Epoch 1600 | deriv 2.523947 | active terms: 12
+Epoch 1650 | deriv 2.523978 | active terms: 12
+Epoch 1700 | deriv 2.523968 | active terms: 12
+Epoch 1750 | deriv 2.523987 | active terms: 12
+Epoch 1800 | deriv 2.523981 | active terms: 12
+Epoch 1850 | deriv 2.523985 | active terms: 12
+Epoch 1900 | deriv 2.524174 | active terms: 12
+Epoch 1950 | deriv 2.523972 | active terms: 12
+Epoch 2000 | deriv 2.524003 | active terms: 12
+Epoch 2050 | deriv 2.523983 | active terms: 12
+Epoch 2100 | deriv 2.523959 | active terms: 12
+Epoch 2150 | deriv 2.524108 | active terms: 12
+Epoch 2200 | deriv 2.523982 | active terms: 12
+Epoch 2250 | deriv 2.523964 | active terms: 12
+Epoch 2300 | deriv 2.524072 | active terms: 12
+Epoch 2350 | deriv 2.523959 | active terms: 12
+Epoch 2400 | deriv 2.523962 | active terms: 12
+Epoch 2450 | deriv 2.523959 | active terms: 12
+Epoch 2500 | deriv 2.523984 | active terms: 12
+Epoch 2550 | deriv 2.523970 | active terms: 12
+Epoch 2600 | deriv 2.523954 | active terms: 12
+Epoch 2650 | deriv 2.523970 | active terms: 12
+Epoch 2700 | deriv 2.524021 | active terms: 12
+Epoch 2750 | deriv 2.523994 | active terms: 12
+Epoch 2800 | deriv 2.523960 | active terms: 12
+Epoch 2850 | deriv 2.524063 | active terms: 12
+Epoch 2900 | deriv 2.523997 | active terms: 12
+Epoch 2950 | deriv 2.523999 | active terms: 12
+Epoch 2999 | deriv 2.523983 | active terms: 12
+
+Refit phase: 600 epochs, lr=2.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 2.523995
+Refit   50 | deriv 2.523952
+Refit  100 | deriv 2.523947
+Refit  150 | deriv 2.523947
+Refit  200 | deriv 2.523947
+Refit  250 | deriv 2.523947
+Refit  300 | deriv 2.523947
+Refit  350 | deriv 2.523947
+Refit  400 | deriv 2.523947
+Refit  450 | deriv 2.523947
+Refit  500 | deriv 2.523947
+Refit  550 | deriv 2.523947
+Refit  599 | deriv 2.523947
+
+============================================================
+RESULT [sw1_dlr01_w1k]
+  Recon: 7.00%  |  Forecast: DIVERGED
+  Active terms: 12  |  Time: 114s
+  dz1/dt = 2.980 + 17.277*z1 - 39.486*z2 + 19.343*z3
+  dz2/dt = 1.741 + 7.898*z1 - 3.066*z2 + 12.193*z3
+  dz3/dt = -1.753 - 3.179*z1 - 40.367*z2 - 14.211*z3
+============================================================
+
+
+######################################################################
+[3/8] sw1_10k: sw=1.0, dlr=0.05, warm=5000, ep=10000, refit=3000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020713 | sindy 10.767129 (w=0.0003) | active terms: 12 | test 0.022384
+Epoch  100 | recon 0.018072 | sindy 12.540359 (w=0.0007) | active terms: 12 | test 0.020303
+Epoch  150 | recon 0.015227 | sindy 12.366073 (w=0.0011) | active terms: 12 | test 0.018353
+Epoch  200 | recon 0.014034 | sindy 10.629723 (w=0.0015) | active terms: 12 | test 0.017196
+Epoch  250 | recon 0.012536 | sindy 8.680897 (w=0.0019) | active terms: 12 | test 0.015608
+Epoch  300 | recon 0.011922 | sindy 6.515220 (w=0.0024) | active terms: 12 | test 0.014749
+Epoch  350 | recon 0.010919 | sindy 5.371794 (w=0.0028) | active terms: 12 | test 0.014553
+Epoch  400 | recon 0.012160 | sindy 4.856351 (w=0.0033) | active terms: 12 | test 0.013675
+Epoch  450 | recon 0.009681 | sindy 4.441566 (w=0.0039) | active terms: 12 | test 0.013573
+Epoch  500 | recon 0.010000 | sindy 4.253125 (w=0.0044) | active terms: 12 | test 0.013372
+Epoch  550 | recon 0.010519 | sindy 4.133896 (w=0.0050) | active terms: 12 | test 0.013378
+Epoch  600 | recon 0.009640 | sindy 4.055480 (w=0.0056) | active terms: 12 | test 0.013085
+Epoch  650 | recon 0.009721 | sindy 3.306298 (w=0.0062) | active terms: 12 | test 0.013111
+Epoch  700 | recon 0.009365 | sindy 3.208638 (w=0.0069) | active terms: 12 | test 0.012755
+Epoch  750 | recon 0.009927 | sindy 3.045245 (w=0.0076) | active terms: 12 | test 0.013349
+Epoch  800 | recon 0.009616 | sindy 2.720836 (w=0.0083) | active terms: 12 | test 0.013192
+Epoch  850 | recon 0.009540 | sindy 2.818946 (w=0.0091) | active terms: 12 | test 0.012904
+Epoch  900 | recon 0.009240 | sindy 2.888551 (w=0.0099) | active terms: 12 | test 0.013366
+Epoch  950 | recon 0.009602 | sindy 2.956039 (w=0.0108) | active terms: 12 | test 0.012735
+Epoch 1000 | recon 0.009668 | sindy 2.364173 (w=0.0117) | active terms: 12 | test 0.012813
+Epoch 1050 | recon 0.010236 | sindy 2.345310 (w=0.0126) | active terms: 12 | test 0.013000
+Epoch 1100 | recon 0.010215 | sindy 3.570671 (w=0.0136) | active terms: 12 | test 0.012928
+Epoch 1150 | recon 0.012750 | sindy 4.504701 (w=0.0146) | active terms: 12 | test 0.014308
+Epoch 1200 | recon 0.013304 | sindy 7.269708 (w=0.0157) | active terms: 12 | test 0.017883
+Epoch 1250 | recon 0.021428 | sindy 9.887421 (w=0.0169) | active terms: 12 | test 0.024005
+Epoch 1300 | recon 0.021887 | sindy 10.146381 (w=0.0181) | active terms: 12 | test 0.026474
+Epoch 1350 | recon 0.019419 | sindy 10.890579 (w=0.0194) | active terms: 12 | test 0.020655
+Epoch 1400 | recon 0.018079 | sindy 9.267972 (w=0.0207) | active terms: 12 | test 0.022801
+Epoch 1450 | recon 0.018889 | sindy 10.476611 (w=0.0221) | active terms: 12 | test 0.022509
+Epoch 1500 | recon 0.019270 | sindy 9.095793 (w=0.0236) | active terms: 12 | test 0.024816
+Epoch 1550 | recon 0.018101 | sindy 8.873087 (w=0.0252) | active terms: 12 | test 0.020621
+Epoch 1600 | recon 0.016287 | sindy 7.885552 (w=0.0268) | active terms: 12 | test 0.018632
+Epoch 1650 | recon 0.014831 | sindy 8.831679 (w=0.0285) | active terms: 12 | test 0.023007
+Epoch 1700 | recon 0.016514 | sindy 6.304296 (w=0.0303) | active terms: 12 | test 0.020143
+Epoch 1750 | recon 0.031700 | sindy 0.936444 (w=0.0323) | active terms: 12 | test 0.022473
+Epoch 1800 | recon 0.018772 | sindy 1.056254 (w=0.0343) | active terms: 12 | test 0.020900
+Epoch 1850 | recon 0.019760 | sindy 1.036725 (w=0.0364) | active terms: 12 | test 0.021452
+Epoch 1900 | recon 0.017563 | sindy 1.566008 (w=0.0386) | active terms: 12 | test 0.019856
+Epoch 1950 | recon 0.016047 | sindy 1.459250 (w=0.0409) | active terms: 12 | test 0.018879
+Epoch 2000 | recon 0.015198 | sindy 2.617937 (w=0.0433) | active terms: 12 | test 0.019601
+Epoch 2050 | recon 0.018673 | sindy 1.631515 (w=0.0459) | active terms: 12 | test 0.018983
+Epoch 2100 | recon 0.016906 | sindy 2.408163 (w=0.0486) | active terms: 12 | test 0.018236
+Epoch 2150 | recon 0.013678 | sindy 1.831294 (w=0.0515) | active terms: 12 | test 0.019280
+Epoch 2200 | recon 0.014266 | sindy 1.872412 (w=0.0544) | active terms: 12 | test 0.019155
+Epoch 2250 | recon 0.014870 | sindy 1.984167 (w=0.0576) | active terms: 12 | test 0.017233
+Epoch 2300 | recon 0.014743 | sindy 2.335434 (w=0.0609) | active terms: 12 | test 0.018421
+Epoch 2350 | recon 0.014430 | sindy 1.639602 (w=0.0643) | active terms: 12 | test 0.017176
+Epoch 2400 | recon 0.012773 | sindy 1.245988 (w=0.0680) | active terms: 12 | test 0.016592
+Epoch 2450 | recon 0.012498 | sindy 0.957830 (w=0.0718) | active terms: 12 | test 0.016602
+Epoch 2500 | recon 0.011492 | sindy 0.824633 (w=0.0759) | active terms: 12 | test 0.016171
+Epoch 2550 | recon 0.014297 | sindy 0.652603 (w=0.0801) | active terms: 12 | test 0.016184
+Epoch 2600 | recon 0.010776 | sindy 0.330434 (w=0.0845) | active terms: 12 | test 0.016698
+Epoch 2650 | recon 0.011843 | sindy 0.244767 (w=0.0892) | active terms: 12 | test 0.017087
+Epoch 2700 | recon 0.011629 | sindy 0.250117 (w=0.0942) | active terms: 12 | test 0.015782
+Epoch 2750 | recon 0.010746 | sindy 0.257693 (w=0.0993) | active terms: 12 | test 0.015796
+Epoch 2800 | recon 0.011309 | sindy 0.214682 (w=0.1048) | active terms: 12 | test 0.015485
+Epoch 2850 | recon 0.011987 | sindy 0.268753 (w=0.1105) | active terms: 12 | test 0.016606
+Epoch 2900 | recon 0.011890 | sindy 0.280637 (w=0.1165) | active terms: 12 | test 0.015654
+Epoch 2950 | recon 0.013041 | sindy 0.355465 (w=0.1228) | active terms: 12 | test 0.016428
+Epoch 3000 | recon 0.012287 | sindy 0.293142 (w=0.1295) | active terms: 12 | test 0.016020
+Epoch 3050 | recon 0.011383 | sindy 0.266636 (w=0.1365) | active terms: 12 | test 0.015532
+Epoch 3100 | recon 0.011213 | sindy 0.373313 (w=0.1438) | active terms: 12 | test 0.015374
+Epoch 3150 | recon 0.011893 | sindy 0.294299 (w=0.1515) | active terms: 12 | test 0.015907
+Epoch 3200 | recon 0.010293 | sindy 0.202812 (w=0.1596) | active terms: 12 | test 0.015812
+Epoch 3250 | recon 0.011302 | sindy 0.199851 (w=0.1682) | active terms: 12 | test 0.015330
+Epoch 3300 | recon 0.011898 | sindy 0.190049 (w=0.1771) | active terms: 12 | test 0.017760
+Epoch 3350 | recon 0.010484 | sindy 0.151202 (w=0.1866) | active terms: 12 | test 0.016349
+Epoch 3400 | recon 0.010306 | sindy 0.115489 (w=0.1965) | active terms: 12 | test 0.015245
+Epoch 3450 | recon 0.011622 | sindy 0.129883 (w=0.2069) | active terms: 12 | test 0.015799
+Epoch 3500 | recon 0.009806 | sindy 0.112138 (w=0.2179) | active terms: 12 | test 0.015458
+Epoch 3550 | recon 0.010964 | sindy 0.096798 (w=0.2294) | active terms: 12 | test 0.014319
+Epoch 3600 | recon 0.011095 | sindy 0.079101 (w=0.2415) | active terms: 12 | test 0.014903
+Epoch 3650 | recon 0.010489 | sindy 0.084546 (w=0.2542) | active terms: 12 | test 0.014196
+Epoch 3700 | recon 0.010849 | sindy 0.083832 (w=0.2676) | active terms: 12 | test 0.014538
+Epoch 3750 | recon 0.010697 | sindy 0.068022 (w=0.2817) | active terms: 12 | test 0.014444
+Epoch 3800 | recon 0.010941 | sindy 0.061754 (w=0.2965) | active terms: 12 | test 0.015442
+Epoch 3850 | recon 0.010843 | sindy 0.057905 (w=0.3120) | active terms: 12 | test 0.015062
+Epoch 3900 | recon 0.010095 | sindy 0.052638 (w=0.3283) | active terms: 12 | test 0.015556
+Epoch 3950 | recon 0.010513 | sindy 0.048974 (w=0.3455) | active terms: 12 | test 0.015460
+Epoch 4000 | recon 0.010479 | sindy 0.051790 (w=0.3636) | active terms: 12 | test 0.014538
+Epoch 4050 | recon 0.011372 | sindy 0.044732 (w=0.3826) | active terms: 12 | test 0.015121
+Epoch 4100 | recon 0.010232 | sindy 0.042740 (w=0.4025) | active terms: 12 | test 0.014303
+Epoch 4150 | recon 0.009948 | sindy 0.036329 (w=0.4235) | active terms: 12 | test 0.015428
+Epoch 4200 | recon 0.010913 | sindy 0.038916 (w=0.4456) | active terms: 12 | test 0.013665
+Epoch 4250 | recon 0.010970 | sindy 0.040744 (w=0.4688) | active terms: 12 | test 0.014874
+Epoch 4300 | recon 0.010459 | sindy 0.043638 (w=0.4932) | active terms: 12 | test 0.015062
+Epoch 4350 | recon 0.010987 | sindy 0.049590 (w=0.5188) | active terms: 12 | test 0.016502
+Epoch 4400 | recon 0.010753 | sindy 0.046197 (w=0.5458) | active terms: 12 | test 0.014917
+Epoch 4450 | recon 0.010208 | sindy 0.086121 (w=0.5741) | active terms: 12 | test 0.014537
+Epoch 4500 | recon 0.010406 | sindy 0.185597 (w=0.6039) | active terms: 12 | test 0.014178
+Epoch 4550 | recon 0.012461 | sindy 0.732556 (w=0.6352) | active terms: 12 | test 0.017453
+Epoch 4600 | recon 0.013030 | sindy 1.580056 (w=0.6681) | active terms: 12 | test 0.016544
+Epoch 4650 | recon 0.016419 | sindy 1.474028 (w=0.7027) | active terms: 12 | test 0.018502
+Epoch 4700 | recon 0.015022 | sindy 5.699134 (w=0.7391) | active terms: 12 | test 0.017457
+Epoch 4750 | recon 0.038069 | sindy 5.472334 (w=0.7773) | active terms: 12 | test 0.033953
+Epoch 4800 | recon 0.043471 | sindy 28.555294 (w=0.8175) | active terms: 12 | test 0.050868
+Epoch 4850 | recon 0.037421 | sindy 39.129070 (w=0.8598) | active terms: 12 | test 0.039832
+Epoch 4900 | recon 0.028712 | sindy 25.738922 (w=0.9042) | active terms: 12 | test 0.026672
+Epoch 4950 | recon 0.026032 | sindy 19.066643 (w=0.9509) | active terms: 12 | test 0.025622
+--- Epoch 5000: E_sindy ramp complete (weight=1.0000) ---
+Epoch 5000 | recon 0.028992 | sindy 18.359694 (w=1.0000) | active terms: 12 | test 0.027433
+Epoch 5050 | recon 0.030174 | sindy 19.611032 (w=1.0000) | active terms: 12 | test 0.027787
+Epoch 5100 | recon 0.023567 | sindy 13.378147 (w=1.0000) | active terms: 12 | test 0.022215
+Epoch 5150 | recon 0.026118 | sindy 16.293083 (w=1.0000) | active terms: 12 | test 0.025292
+Epoch 5200 | recon 0.028964 | sindy 14.714614 (w=1.0000) | active terms: 12 | test 0.026364
+Epoch 5250 | recon 0.030368 | sindy 8.267178 (w=1.0000) | active terms: 12 | test 0.028254
+Epoch 5300 | recon 0.025988 | sindy 10.466053 (w=1.0000) | active terms: 12 | test 0.028923
+Epoch 5350 | recon 0.050280 | sindy 3.799146 (w=1.0000) | active terms: 12 | test 0.056050
+Epoch 5400 | recon 0.049205 | sindy 2.736845 (w=1.0000) | active terms: 12 | test 0.052934
+Epoch 5450 | recon 0.045939 | sindy 2.493580 (w=1.0000) | active terms: 12 | test 0.047149
+Epoch 5500 | recon 0.037854 | sindy 2.121551 (w=1.0000) | active terms: 12 | test 0.048812
+Epoch 5550 | recon 0.039935 | sindy 2.311469 (w=1.0000) | active terms: 12 | test 0.050383
+Epoch 5600 | recon 0.040689 | sindy 2.134325 (w=1.0000) | active terms: 12 | test 0.047491
+Epoch 5650 | recon 0.038124 | sindy 2.188338 (w=1.0000) | active terms: 12 | test 0.043347
+Epoch 5700 | recon 0.035662 | sindy 2.188546 (w=1.0000) | active terms: 12 | test 0.038994
+Epoch 5750 | recon 0.028234 | sindy 2.224744 (w=1.0000) | active terms: 12 | test 0.035534
+Epoch 5800 | recon 0.032802 | sindy 2.120504 (w=1.0000) | active terms: 12 | test 0.035684
+Epoch 5850 | recon 0.026742 | sindy 2.018975 (w=1.0000) | active terms: 12 | test 0.032953
+Epoch 5900 | recon 0.030886 | sindy 1.977633 (w=1.0000) | active terms: 12 | test 0.031130
+Epoch 5950 | recon 0.025944 | sindy 1.987236 (w=1.0000) | active terms: 12 | test 0.030193
+Epoch 6000 | recon 0.024412 | sindy 2.097052 (w=1.0000) | active terms: 12 | test 0.029821
+Epoch 6050 | recon 0.026347 | sindy 1.954473 (w=1.0000) | active terms: 12 | test 0.030484
+Epoch 6100 | recon 0.022812 | sindy 2.011707 (w=1.0000) | active terms: 12 | test 0.029978
+Epoch 6150 | recon 0.024366 | sindy 1.954505 (w=1.0000) | active terms: 12 | test 0.031783
+Epoch 6200 | recon 0.027678 | sindy 1.877214 (w=1.0000) | active terms: 12 | test 0.029456
+Epoch 6250 | recon 0.024649 | sindy 1.908262 (w=1.0000) | active terms: 12 | test 0.030169
+Epoch 6300 | recon 0.024491 | sindy 1.660487 (w=1.0000) | active terms: 12 | test 0.028756
+Epoch 6350 | recon 0.020109 | sindy 1.687416 (w=1.0000) | active terms: 12 | test 0.030908
+Epoch 6400 | recon 0.018673 | sindy 1.594576 (w=1.0000) | active terms: 12 | test 0.028653
+Epoch 6450 | recon 0.027621 | sindy 1.428871 (w=1.0000) | active terms: 12 | test 0.029376
+Epoch 6500 | recon 0.026368 | sindy 1.580826 (w=1.0000) | active terms: 12 | test 0.028287
+Epoch 6550 | recon 0.018166 | sindy 1.509928 (w=1.0000) | active terms: 12 | test 0.029783
+Epoch 6600 | recon 0.027247 | sindy 1.349119 (w=1.0000) | active terms: 12 | test 0.027821
+Epoch 6650 | recon 0.027999 | sindy 1.439392 (w=1.0000) | active terms: 12 | test 0.027923
+Epoch 6700 | recon 0.021049 | sindy 1.132185 (w=1.0000) | active terms: 12 | test 0.027185
+Epoch 6750 | recon 0.021338 | sindy 1.178014 (w=1.0000) | active terms: 12 | test 0.028001
+Epoch 6800 | recon 0.020373 | sindy 1.086179 (w=1.0000) | active terms: 12 | test 0.027652
+Epoch 6850 | recon 0.021246 | sindy 1.042746 (w=1.0000) | active terms: 12 | test 0.026833
+Epoch 6900 | recon 0.019113 | sindy 1.053446 (w=1.0000) | active terms: 12 | test 0.028068
+Epoch 6950 | recon 0.021466 | sindy 0.921771 (w=1.0000) | active terms: 12 | test 0.027331
+Epoch 7000 | recon 0.021134 | sindy 0.880153 (w=1.0000) | active terms: 12 | test 0.026846
+Epoch 7050 | recon 0.019078 | sindy 0.824495 (w=1.0000) | active terms: 12 | test 0.025957
+Epoch 7100 | recon 0.018721 | sindy 0.753328 (w=1.0000) | active terms: 12 | test 0.026057
+Epoch 7150 | recon 0.016344 | sindy 0.690554 (w=1.0000) | active terms: 12 | test 0.025308
+Epoch 7200 | recon 0.016983 | sindy 0.660048 (w=1.0000) | active terms: 12 | test 0.026102
+Epoch 7250 | recon 0.016395 | sindy 0.629739 (w=1.0000) | active terms: 12 | test 0.024549
+Epoch 7300 | recon 0.017510 | sindy 0.557253 (w=1.0000) | active terms: 12 | test 0.023801
+Epoch 7350 | recon 0.014857 | sindy 0.536994 (w=1.0000) | active terms: 12 | test 0.023811
+Epoch 7400 | recon 0.014829 | sindy 0.463890 (w=1.0000) | active terms: 12 | test 0.021910
+Epoch 7450 | recon 0.012398 | sindy 0.481774 (w=1.0000) | active terms: 12 | test 0.022383
+Epoch 7500 | recon 0.017055 | sindy 0.431181 (w=1.0000) | active terms: 12 | test 0.021284
+Epoch 7550 | recon 0.013969 | sindy 0.369334 (w=1.0000) | active terms: 12 | test 0.022118
+Epoch 7600 | recon 0.013869 | sindy 0.406387 (w=1.0000) | active terms: 12 | test 0.021256
+Epoch 7650 | recon 0.013441 | sindy 0.309145 (w=1.0000) | active terms: 12 | test 0.020890
+Epoch 7700 | recon 0.013310 | sindy 0.325554 (w=1.0000) | active terms: 12 | test 0.020787
+Epoch 7750 | recon 0.012464 | sindy 0.320458 (w=1.0000) | active terms: 12 | test 0.020640
+Epoch 7800 | recon 0.013113 | sindy 0.302532 (w=1.0000) | active terms: 12 | test 0.022676
+Epoch 7850 | recon 0.012334 | sindy 0.283780 (w=1.0000) | active terms: 12 | test 0.020689
+Epoch 7900 | recon 0.011989 | sindy 0.273548 (w=1.0000) | active terms: 12 | test 0.021726
+Epoch 7950 | recon 0.011522 | sindy 0.233793 (w=1.0000) | active terms: 12 | test 0.019665
+Epoch 8000 | recon 0.012141 | sindy 0.249238 (w=1.0000) | active terms: 12 | test 0.020538
+Epoch 8050 | recon 0.013500 | sindy 0.233927 (w=1.0000) | active terms: 12 | test 0.021328
+Epoch 8100 | recon 0.011435 | sindy 0.204548 (w=1.0000) | active terms: 12 | test 0.021981
+Epoch 8150 | recon 0.012178 | sindy 0.199787 (w=1.0000) | active terms: 12 | test 0.022099
+Epoch 8200 | recon 0.011587 | sindy 0.174930 (w=1.0000) | active terms: 12 | test 0.022471
+Epoch 8250 | recon 0.012654 | sindy 0.167920 (w=1.0000) | active terms: 12 | test 0.022099
+Epoch 8300 | recon 0.012145 | sindy 0.151630 (w=1.0000) | active terms: 12 | test 0.022404
+Epoch 8350 | recon 0.012470 | sindy 0.155932 (w=1.0000) | active terms: 12 | test 0.022132
+Epoch 8400 | recon 0.012753 | sindy 0.165840 (w=1.0000) | active terms: 12 | test 0.022662
+Epoch 8450 | recon 0.011495 | sindy 0.132352 (w=1.0000) | active terms: 12 | test 0.022150
+Epoch 8500 | recon 0.012697 | sindy 0.119175 (w=1.0000) | active terms: 12 | test 0.022235
+Epoch 8550 | recon 0.011178 | sindy 0.114049 (w=1.0000) | active terms: 12 | test 0.022968
+Epoch 8600 | recon 0.012272 | sindy 0.093669 (w=1.0000) | active terms: 12 | test 0.023713
+Epoch 8650 | recon 0.013737 | sindy 0.099989 (w=1.0000) | active terms: 12 | test 0.022076
+Epoch 8700 | recon 0.010892 | sindy 0.086594 (w=1.0000) | active terms: 12 | test 0.021474
+Epoch 8750 | recon 0.012713 | sindy 0.084935 (w=1.0000) | active terms: 12 | test 0.020928
+Epoch 8800 | recon 0.011719 | sindy 0.070826 (w=1.0000) | active terms: 12 | test 0.022542
+Epoch 8850 | recon 0.011774 | sindy 0.075651 (w=1.0000) | active terms: 12 | test 0.020919
+Epoch 8900 | recon 0.011177 | sindy 0.071971 (w=1.0000) | active terms: 12 | test 0.021984
+Epoch 8950 | recon 0.010938 | sindy 0.068420 (w=1.0000) | active terms: 12 | test 0.021091
+Epoch 9000 | recon 0.012426 | sindy 0.057149 (w=1.0000) | active terms: 12 | test 0.021675
+Epoch 9050 | recon 0.012463 | sindy 0.055248 (w=1.0000) | active terms: 12 | test 0.020311
+Epoch 9100 | recon 0.011743 | sindy 0.055383 (w=1.0000) | active terms: 12 | test 0.020125
+Epoch 9150 | recon 0.010331 | sindy 0.048725 (w=1.0000) | active terms: 12 | test 0.019338
+Epoch 9200 | recon 0.010293 | sindy 0.046258 (w=1.0000) | active terms: 12 | test 0.019903
+Epoch 9250 | recon 0.011137 | sindy 0.043531 (w=1.0000) | active terms: 12 | test 0.019991
+Epoch 9300 | recon 0.011174 | sindy 0.044915 (w=1.0000) | active terms: 12 | test 0.021273
+Epoch 9350 | recon 0.010507 | sindy 0.038959 (w=1.0000) | active terms: 12 | test 0.020417
+Epoch 9400 | recon 0.010745 | sindy 0.038567 (w=1.0000) | active terms: 12 | test 0.020280
+Epoch 9450 | recon 0.010250 | sindy 0.037654 (w=1.0000) | active terms: 12 | test 0.019935
+Epoch 9500 | recon 0.011696 | sindy 0.039955 (w=1.0000) | active terms: 12 | test 0.019289
+Epoch 9550 | recon 0.010467 | sindy 0.037340 (w=1.0000) | active terms: 12 | test 0.019707
+Epoch 9600 | recon 0.010655 | sindy 0.034033 (w=1.0000) | active terms: 12 | test 0.019655
+Epoch 9650 | recon 0.011375 | sindy 0.038715 (w=1.0000) | active terms: 12 | test 0.019610
+Epoch 9700 | recon 0.010538 | sindy 0.035304 (w=1.0000) | active terms: 12 | test 0.018948
+Epoch 9750 | recon 0.010661 | sindy 0.033323 (w=1.0000) | active terms: 12 | test 0.018046
+Epoch 9800 | recon 0.011316 | sindy 0.033488 (w=1.0000) | active terms: 12 | test 0.018541
+Epoch 9850 | recon 0.010808 | sindy 0.037354 (w=1.0000) | active terms: 12 | test 0.018435
+Epoch 9900 | recon 0.011275 | sindy 0.033488 (w=1.0000) | active terms: 12 | test 0.018590
+Epoch 9950 | recon 0.011421 | sindy 0.028619 (w=1.0000) | active terms: 12 | test 0.018707
+Epoch 9999 | recon 0.011397 | sindy 0.032862 (w=1.0000) | active terms: 12 | test 0.018664
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 0.005431 | active terms: 12
+Epoch   50 | deriv 0.005427 | active terms: 12
+Epoch  100 | deriv 0.005388 | active terms: 12
+Epoch  150 | deriv 0.005373 | active terms: 12
+Epoch  200 | deriv 0.005355 | active terms: 12
+Epoch  250 | deriv 0.005335 | active terms: 12
+Epoch  300 | deriv 0.005313 | active terms: 12
+Epoch  350 | deriv 0.005290 | active terms: 12
+Epoch  400 | deriv 0.005265 | active terms: 12
+Epoch  450 | deriv 0.005239 | active terms: 12
+Epoch  500 | deriv 0.005212 | active terms: 12
+Epoch  550 | deriv 0.005184 | active terms: 12
+Epoch  600 | deriv 0.005156 | active terms: 12
+Epoch  650 | deriv 0.005127 | active terms: 12
+Epoch  700 | deriv 0.005098 | active terms: 12
+Epoch  750 | deriv 0.005068 | active terms: 12
+Epoch  800 | deriv 0.005039 | active terms: 12
+Epoch  850 | deriv 0.005009 | active terms: 12
+Epoch  900 | deriv 0.004980 | active terms: 12
+Epoch  950 | deriv 0.004951 | active terms: 12
+Epoch 1000 | deriv 0.004922 | active terms: 12
+Epoch 1050 | deriv 0.004893 | active terms: 12
+Epoch 1100 | deriv 0.004865 | active terms: 12
+Epoch 1150 | deriv 0.004838 | active terms: 12
+Epoch 1200 | deriv 0.004812 | active terms: 12
+Epoch 1250 | deriv 0.004786 | active terms: 12
+Epoch 1300 | deriv 0.004760 | active terms: 12
+Epoch 1350 | deriv 0.004736 | active terms: 12
+Epoch 1400 | deriv 0.004713 | active terms: 12
+Epoch 1450 | deriv 0.004690 | active terms: 12
+Epoch 1500 | deriv 0.004669 | active terms: 12
+Epoch 1550 | deriv 0.004648 | active terms: 12
+Epoch 1600 | deriv 0.004629 | active terms: 12
+Epoch 1650 | deriv 0.004610 | active terms: 12
+Epoch 1700 | deriv 0.004592 | active terms: 12
+Epoch 1750 | deriv 0.004576 | active terms: 12
+Epoch 1800 | deriv 0.004560 | active terms: 12
+Epoch 1850 | deriv 0.004545 | active terms: 12
+Epoch 1900 | deriv 0.004565 | active terms: 12
+Epoch 1950 | deriv 0.004519 | active terms: 12
+Epoch 2000 | deriv 0.004526 | active terms: 12
+Epoch 2050 | deriv 0.004499 | active terms: 12
+Epoch 2100 | deriv 0.004516 | active terms: 12
+Epoch 2150 | deriv 0.004479 | active terms: 12
+Epoch 2200 | deriv 0.004487 | active terms: 12
+Epoch 2250 | deriv 0.004483 | active terms: 12
+Epoch 2300 | deriv 0.004473 | active terms: 12
+Epoch 2350 | deriv 0.004455 | active terms: 12
+Epoch 2400 | deriv 0.004467 | active terms: 12
+Epoch 2450 | deriv 0.004470 | active terms: 12
+Epoch 2500 | deriv 0.004449 | active terms: 12
+Epoch 2550 | deriv 0.004451 | active terms: 12
+Epoch 2600 | deriv 0.004431 | active terms: 12
+Epoch 2650 | deriv 0.004441 | active terms: 12
+Epoch 2700 | deriv 0.004450 | active terms: 12
+Epoch 2750 | deriv 0.004422 | active terms: 12
+Epoch 2800 | deriv 0.004424 | active terms: 12
+Epoch 2850 | deriv 0.004424 | active terms: 12
+Epoch 2900 | deriv 0.004445 | active terms: 12
+Epoch 2950 | deriv 0.004426 | active terms: 12
+Epoch 2999 | deriv 0.004424 | active terms: 12
+
+Refit phase: 600 epochs, lr=1.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.004425
+Refit   50 | deriv 0.004412
+Refit  100 | deriv 0.004410
+Refit  150 | deriv 0.004410
+Refit  200 | deriv 0.004410
+Refit  250 | deriv 0.004409
+Refit  300 | deriv 0.004409
+Refit  350 | deriv 0.004408
+Refit  400 | deriv 0.004408
+Refit  450 | deriv 0.004407
+Refit  500 | deriv 0.004407
+Refit  550 | deriv 0.004406
+Refit  599 | deriv 0.004406
+
+============================================================
+RESULT [sw1_10k]
+  Recon: 5.66%  |  Forecast: 1713.27%
+  Active terms: 12  |  Time: 228s
+  dz1/dt = 4.975 - 1.378*z1 + 9.411*z2 + 32.294*z3
+  dz2/dt = -3.930 + 26.735*z1 - 0.295*z2 + 47.955*z3
+  dz3/dt = 19.408 - 48.528*z1 + 24.835*z2 + 2.657*z3
+============================================================
+
+
+######################################################################
+[4/8] sw1_dlr01_10k: sw=1.0, dlr=0.1, warm=5000, ep=10000, refit=3000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020717 | sindy 10.720798 (w=0.0003) | active terms: 12 | test 0.022386
+Epoch  100 | recon 0.018071 | sindy 12.480268 (w=0.0007) | active terms: 12 | test 0.020299
+Epoch  150 | recon 0.015203 | sindy 12.212454 (w=0.0011) | active terms: 12 | test 0.018381
+Epoch  200 | recon 0.014121 | sindy 9.767390 (w=0.0015) | active terms: 12 | test 0.016879
+Epoch  250 | recon 0.012386 | sindy 7.861009 (w=0.0019) | active terms: 12 | test 0.015611
+Epoch  300 | recon 0.011787 | sindy 6.227049 (w=0.0024) | active terms: 12 | test 0.014704
+Epoch  350 | recon 0.010799 | sindy 5.163718 (w=0.0028) | active terms: 12 | test 0.014494
+Epoch  400 | recon 0.011918 | sindy 4.596295 (w=0.0033) | active terms: 12 | test 0.013593
+Epoch  450 | recon 0.009630 | sindy 4.319982 (w=0.0039) | active terms: 12 | test 0.013543
+Epoch  500 | recon 0.009924 | sindy 4.080664 (w=0.0044) | active terms: 12 | test 0.013280
+Epoch  550 | recon 0.010449 | sindy 4.041815 (w=0.0050) | active terms: 12 | test 0.013014
+Epoch  600 | recon 0.009400 | sindy 3.971483 (w=0.0056) | active terms: 12 | test 0.012935
+Epoch  650 | recon 0.009574 | sindy 3.333089 (w=0.0062) | active terms: 12 | test 0.012794
+Epoch  700 | recon 0.009704 | sindy 3.612077 (w=0.0069) | active terms: 12 | test 0.012743
+Epoch  750 | recon 0.009934 | sindy 3.532824 (w=0.0076) | active terms: 12 | test 0.013309
+Epoch  800 | recon 0.009672 | sindy 3.599341 (w=0.0083) | active terms: 12 | test 0.013342
+Epoch  850 | recon 0.009744 | sindy 3.314682 (w=0.0091) | active terms: 12 | test 0.012939
+Epoch  900 | recon 0.009651 | sindy 3.418287 (w=0.0099) | active terms: 12 | test 0.014283
+Epoch  950 | recon 0.010139 | sindy 4.550042 (w=0.0108) | active terms: 12 | test 0.013123
+Epoch 1000 | recon 0.010892 | sindy 4.683591 (w=0.0117) | active terms: 12 | test 0.014046
+Epoch 1050 | recon 0.010970 | sindy 5.467798 (w=0.0126) | active terms: 12 | test 0.014031
+Epoch 1100 | recon 0.011894 | sindy 5.962768 (w=0.0136) | active terms: 12 | test 0.014150
+Epoch 1150 | recon 0.016495 | sindy 4.321632 (w=0.0146) | active terms: 12 | test 0.017583
+Epoch 1200 | recon 0.013292 | sindy 2.874300 (w=0.0157) | active terms: 12 | test 0.016823
+Epoch 1250 | recon 0.012380 | sindy 2.595676 (w=0.0169) | active terms: 12 | test 0.015294
+Epoch 1300 | recon 0.012904 | sindy 2.798684 (w=0.0181) | active terms: 12 | test 0.014813
+Epoch 1350 | recon 0.013080 | sindy 4.026214 (w=0.0194) | active terms: 12 | test 0.015313
+Epoch 1400 | recon 0.017007 | sindy 10.685030 (w=0.0207) | active terms: 12 | test 0.019373
+Epoch 1450 | recon 0.021765 | sindy 15.556175 (w=0.0221) | active terms: 12 | test 0.020598
+Epoch 1500 | recon 0.025539 | sindy 14.270117 (w=0.0236) | active terms: 12 | test 0.030365
+Epoch 1550 | recon 0.024254 | sindy 13.283643 (w=0.0252) | active terms: 12 | test 0.028894
+Epoch 1600 | recon 0.016275 | sindy 11.325469 (w=0.0268) | active terms: 12 | test 0.027110
+Epoch 1650 | recon 0.021802 | sindy 9.985653 (w=0.0285) | active terms: 12 | test 0.032417
+Epoch 1700 | recon 0.023287 | sindy 9.618552 (w=0.0303) | active terms: 12 | test 0.033874
+Epoch 1750 | recon 0.025631 | sindy 9.718182 (w=0.0323) | active terms: 12 | test 0.035940
+Epoch 1800 | recon 0.023298 | sindy 8.345623 (w=0.0343) | active terms: 12 | test 0.030286
+Epoch 1850 | recon 0.018962 | sindy 7.226850 (w=0.0364) | active terms: 12 | test 0.027582
+Epoch 1900 | recon 0.020274 | sindy 5.831165 (w=0.0386) | active terms: 12 | test 0.026775
+Epoch 1950 | recon 0.016594 | sindy 5.396041 (w=0.0409) | active terms: 12 | test 0.024725
+Epoch 2000 | recon 0.014353 | sindy 4.826186 (w=0.0433) | active terms: 12 | test 0.023347
+Epoch 2050 | recon 0.015936 | sindy 4.884092 (w=0.0459) | active terms: 12 | test 0.023021
+Epoch 2100 | recon 0.014640 | sindy 5.952328 (w=0.0486) | active terms: 12 | test 0.022367
+Epoch 2150 | recon 0.016498 | sindy 6.455923 (w=0.0515) | active terms: 12 | test 0.022809
+Epoch 2200 | recon 0.014613 | sindy 6.026437 (w=0.0544) | active terms: 12 | test 0.021713
+Epoch 2250 | recon 0.013831 | sindy 6.229515 (w=0.0576) | active terms: 12 | test 0.022239
+Epoch 2300 | recon 0.014735 | sindy 6.732422 (w=0.0609) | active terms: 12 | test 0.022370
+Epoch 2350 | recon 0.016363 | sindy 5.131642 (w=0.0643) | active terms: 12 | test 0.023915
+Epoch 2400 | recon 0.020293 | sindy 1.768052 (w=0.0680) | active terms: 12 | test 0.034363
+Epoch 2450 | recon 0.017182 | sindy 1.429021 (w=0.0718) | active terms: 12 | test 0.026097
+Epoch 2500 | recon 0.014562 | sindy 2.550063 (w=0.0759) | active terms: 12 | test 0.017007
+Epoch 2550 | recon 0.017034 | sindy 4.612419 (w=0.0801) | active terms: 12 | test 0.019611
+Epoch 2600 | recon 0.012702 | sindy 6.795878 (w=0.0845) | active terms: 12 | test 0.019876
+Epoch 2650 | recon 0.022680 | sindy 2.108791 (w=0.0892) | active terms: 12 | test 0.029880
+Epoch 2700 | recon 0.023476 | sindy 1.119914 (w=0.0942) | active terms: 12 | test 0.042489
+Epoch 2750 | recon 0.024725 | sindy 0.747424 (w=0.0993) | active terms: 12 | test 0.030695
+Epoch 2800 | recon 0.019205 | sindy 0.632839 (w=0.1048) | active terms: 12 | test 0.032119
+Epoch 2850 | recon 0.015209 | sindy 0.800777 (w=0.1105) | active terms: 12 | test 0.023832
+Epoch 2900 | recon 0.016321 | sindy 0.409076 (w=0.1165) | active terms: 12 | test 0.026561
+Epoch 2950 | recon 0.018062 | sindy 0.351920 (w=0.1228) | active terms: 12 | test 0.024482
+Epoch 3000 | recon 0.015531 | sindy 0.309684 (w=0.1295) | active terms: 12 | test 0.026528
+Epoch 3050 | recon 0.013584 | sindy 0.305562 (w=0.1365) | active terms: 12 | test 0.025479
+Epoch 3100 | recon 0.015635 | sindy 0.290187 (w=0.1438) | active terms: 12 | test 0.023966
+Epoch 3150 | recon 0.012647 | sindy 0.324345 (w=0.1515) | active terms: 12 | test 0.025528
+Epoch 3200 | recon 0.012956 | sindy 0.280626 (w=0.1596) | active terms: 12 | test 0.024549
+Epoch 3250 | recon 0.012357 | sindy 0.264173 (w=0.1682) | active terms: 12 | test 0.023899
+Epoch 3300 | recon 0.013067 | sindy 0.211405 (w=0.1771) | active terms: 12 | test 0.024230
+Epoch 3350 | recon 0.013322 | sindy 0.215444 (w=0.1866) | active terms: 12 | test 0.023372
+Epoch 3400 | recon 0.013241 | sindy 0.143192 (w=0.1965) | active terms: 12 | test 0.024862
+Epoch 3450 | recon 0.014028 | sindy 0.121642 (w=0.2069) | active terms: 12 | test 0.022164
+Epoch 3500 | recon 0.011917 | sindy 0.105704 (w=0.2179) | active terms: 12 | test 0.022161
+Epoch 3550 | recon 0.012895 | sindy 0.128857 (w=0.2294) | active terms: 12 | test 0.018316
+Epoch 3600 | recon 0.011685 | sindy 0.225690 (w=0.2415) | active terms: 12 | test 0.017595
+Epoch 3650 | recon 0.015417 | sindy 0.425836 (w=0.2542) | active terms: 12 | test 0.015629
+Epoch 3700 | recon 0.015480 | sindy 0.564732 (w=0.2676) | active terms: 12 | test 0.018722
+Epoch 3750 | recon 0.017828 | sindy 0.870958 (w=0.2817) | active terms: 12 | test 0.018285
+Epoch 3800 | recon 0.012997 | sindy 1.016585 (w=0.2965) | active terms: 12 | test 0.016059
+Epoch 3850 | recon 0.011579 | sindy 0.807597 (w=0.3120) | active terms: 12 | test 0.015400
+Epoch 3900 | recon 0.012065 | sindy 0.628190 (w=0.3283) | active terms: 12 | test 0.015819
+Epoch 3950 | recon 0.011547 | sindy 0.348458 (w=0.3455) | active terms: 12 | test 0.014500
+Epoch 4000 | recon 0.010775 | sindy 0.277969 (w=0.3636) | active terms: 12 | test 0.014665
+Epoch 4050 | recon 0.011853 | sindy 0.279807 (w=0.3826) | active terms: 12 | test 0.013833
+Epoch 4100 | recon 0.010923 | sindy 0.224437 (w=0.4025) | active terms: 12 | test 0.014150
+Epoch 4150 | recon 0.013197 | sindy 0.193953 (w=0.4235) | active terms: 12 | test 0.013532
+Epoch 4200 | recon 0.012214 | sindy 0.174766 (w=0.4456) | active terms: 12 | test 0.013258
+Epoch 4250 | recon 0.011301 | sindy 0.146471 (w=0.4688) | active terms: 12 | test 0.013202
+Epoch 4300 | recon 0.011249 | sindy 0.123920 (w=0.4932) | active terms: 12 | test 0.012904
+Epoch 4350 | recon 0.012202 | sindy 0.105556 (w=0.5188) | active terms: 12 | test 0.013354
+Epoch 4400 | recon 0.011608 | sindy 0.092430 (w=0.5458) | active terms: 12 | test 0.013134
+Epoch 4450 | recon 0.010498 | sindy 0.079580 (w=0.5741) | active terms: 12 | test 0.012924
+Epoch 4500 | recon 0.010616 | sindy 0.079584 (w=0.6039) | active terms: 12 | test 0.012746
+Epoch 4550 | recon 0.010949 | sindy 0.077560 (w=0.6352) | active terms: 12 | test 0.012766
+Epoch 4600 | recon 0.010202 | sindy 0.070821 (w=0.6681) | active terms: 12 | test 0.013011
+Epoch 4650 | recon 0.010256 | sindy 0.061311 (w=0.7027) | active terms: 12 | test 0.012838
+Epoch 4700 | recon 0.010648 | sindy 0.057389 (w=0.7391) | active terms: 12 | test 0.013083
+Epoch 4750 | recon 0.010204 | sindy 0.053141 (w=0.7773) | active terms: 12 | test 0.012955
+Epoch 4800 | recon 0.010835 | sindy 0.048031 (w=0.8175) | active terms: 12 | test 0.012665
+Epoch 4850 | recon 0.010826 | sindy 0.051093 (w=0.8598) | active terms: 12 | test 0.013163
+Epoch 4900 | recon 0.010642 | sindy 0.043926 (w=0.9042) | active terms: 12 | test 0.012531
+Epoch 4950 | recon 0.010407 | sindy 0.045868 (w=0.9509) | active terms: 12 | test 0.013420
+--- Epoch 5000: E_sindy ramp complete (weight=1.0000) ---
+Epoch 5000 | recon 0.010164 | sindy 0.042617 (w=1.0000) | active terms: 12 | test 0.012602
+Epoch 5050 | recon 0.009965 | sindy 0.042613 (w=1.0000) | active terms: 12 | test 0.012624
+Epoch 5100 | recon 0.010674 | sindy 0.039114 (w=1.0000) | active terms: 12 | test 0.012569
+Epoch 5150 | recon 0.010270 | sindy 0.039526 (w=1.0000) | active terms: 12 | test 0.012492
+Epoch 5200 | recon 0.009926 | sindy 0.030612 (w=1.0000) | active terms: 12 | test 0.013019
+Epoch 5250 | recon 0.010152 | sindy 0.030863 (w=1.0000) | active terms: 12 | test 0.012915
+Epoch 5300 | recon 0.010568 | sindy 0.028324 (w=1.0000) | active terms: 12 | test 0.012779
+Epoch 5350 | recon 0.010640 | sindy 0.027359 (w=1.0000) | active terms: 12 | test 0.012495
+Epoch 5400 | recon 0.010280 | sindy 0.021248 (w=1.0000) | active terms: 12 | test 0.012598
+Epoch 5450 | recon 0.010397 | sindy 0.021660 (w=1.0000) | active terms: 12 | test 0.013102
+Epoch 5500 | recon 0.009922 | sindy 0.021313 (w=1.0000) | active terms: 12 | test 0.012928
+Epoch 5550 | recon 0.010084 | sindy 0.021410 (w=1.0000) | active terms: 12 | test 0.012433
+Epoch 5600 | recon 0.009344 | sindy 0.019712 (w=1.0000) | active terms: 12 | test 0.012370
+Epoch 5650 | recon 0.010825 | sindy 0.018203 (w=1.0000) | active terms: 12 | test 0.012680
+Epoch 5700 | recon 0.010505 | sindy 0.018380 (w=1.0000) | active terms: 12 | test 0.013310
+Epoch 5750 | recon 0.009586 | sindy 0.016793 (w=1.0000) | active terms: 12 | test 0.012298
+Epoch 5800 | recon 0.009077 | sindy 0.015668 (w=1.0000) | active terms: 12 | test 0.012892
+Epoch 5850 | recon 0.009143 | sindy 0.014743 (w=1.0000) | active terms: 12 | test 0.012370
+Epoch 5900 | recon 0.012246 | sindy 0.015132 (w=1.0000) | active terms: 12 | test 0.012757
+Epoch 5950 | recon 0.009690 | sindy 0.013939 (w=1.0000) | active terms: 12 | test 0.012370
+Epoch 6000 | recon 0.010013 | sindy 0.013580 (w=1.0000) | active terms: 12 | test 0.012902
+Epoch 6050 | recon 0.009628 | sindy 0.014329 (w=1.0000) | active terms: 12 | test 0.012177
+Epoch 6100 | recon 0.009756 | sindy 0.013624 (w=1.0000) | active terms: 12 | test 0.013163
+Epoch 6150 | recon 0.010550 | sindy 0.013836 (w=1.0000) | active terms: 12 | test 0.012349
+Epoch 6200 | recon 0.010220 | sindy 0.013837 (w=1.0000) | active terms: 12 | test 0.013196
+Epoch 6250 | recon 0.009401 | sindy 0.011570 (w=1.0000) | active terms: 12 | test 0.012455
+Epoch 6300 | recon 0.009893 | sindy 0.012502 (w=1.0000) | active terms: 12 | test 0.012466
+Epoch 6350 | recon 0.010104 | sindy 0.010859 (w=1.0000) | active terms: 12 | test 0.012592
+Epoch 6400 | recon 0.010124 | sindy 0.011543 (w=1.0000) | active terms: 12 | test 0.012647
+Epoch 6450 | recon 0.009588 | sindy 0.010752 (w=1.0000) | active terms: 12 | test 0.012344
+Epoch 6500 | recon 0.009386 | sindy 0.011092 (w=1.0000) | active terms: 12 | test 0.012300
+Epoch 6550 | recon 0.009313 | sindy 0.010505 (w=1.0000) | active terms: 12 | test 0.013184
+Epoch 6600 | recon 0.009920 | sindy 0.010508 (w=1.0000) | active terms: 12 | test 0.012489
+Epoch 6650 | recon 0.010090 | sindy 0.008931 (w=1.0000) | active terms: 12 | test 0.012561
+Epoch 6700 | recon 0.012160 | sindy 0.009895 (w=1.0000) | active terms: 12 | test 0.013346
+Epoch 6750 | recon 0.009421 | sindy 0.009107 (w=1.0000) | active terms: 12 | test 0.013177
+Epoch 6800 | recon 0.010066 | sindy 0.008567 (w=1.0000) | active terms: 12 | test 0.012744
+Epoch 6850 | recon 0.010269 | sindy 0.009212 (w=1.0000) | active terms: 12 | test 0.012976
+Epoch 6900 | recon 0.010016 | sindy 0.009437 (w=1.0000) | active terms: 12 | test 0.012812
+Epoch 6950 | recon 0.009704 | sindy 0.010094 (w=1.0000) | active terms: 12 | test 0.013064
+Epoch 7000 | recon 0.009827 | sindy 0.009468 (w=1.0000) | active terms: 12 | test 0.012875
+Epoch 7050 | recon 0.009658 | sindy 0.009055 (w=1.0000) | active terms: 12 | test 0.012242
+Epoch 7100 | recon 0.010954 | sindy 0.008374 (w=1.0000) | active terms: 12 | test 0.012239
+Epoch 7150 | recon 0.010413 | sindy 0.008660 (w=1.0000) | active terms: 12 | test 0.012459
+Epoch 7200 | recon 0.009481 | sindy 0.008382 (w=1.0000) | active terms: 12 | test 0.012299
+Epoch 7250 | recon 0.009778 | sindy 0.007476 (w=1.0000) | active terms: 12 | test 0.013028
+Epoch 7300 | recon 0.010093 | sindy 0.008030 (w=1.0000) | active terms: 12 | test 0.012494
+Epoch 7350 | recon 0.010938 | sindy 0.008022 (w=1.0000) | active terms: 12 | test 0.013064
+Epoch 7400 | recon 0.009526 | sindy 0.007527 (w=1.0000) | active terms: 12 | test 0.012413
+Epoch 7450 | recon 0.008888 | sindy 0.008425 (w=1.0000) | active terms: 12 | test 0.012955
+Epoch 7500 | recon 0.009721 | sindy 0.008838 (w=1.0000) | active terms: 12 | test 0.012286
+Epoch 7550 | recon 0.010541 | sindy 0.007193 (w=1.0000) | active terms: 12 | test 0.013354
+Epoch 7600 | recon 0.009766 | sindy 0.008200 (w=1.0000) | active terms: 12 | test 0.012064
+Epoch 7650 | recon 0.009601 | sindy 0.008054 (w=1.0000) | active terms: 12 | test 0.013427
+Epoch 7700 | recon 0.008766 | sindy 0.007553 (w=1.0000) | active terms: 12 | test 0.013160
+Epoch 7750 | recon 0.009495 | sindy 0.007261 (w=1.0000) | active terms: 12 | test 0.013428
+Epoch 7800 | recon 0.010073 | sindy 0.007379 (w=1.0000) | active terms: 12 | test 0.012578
+Epoch 7850 | recon 0.009490 | sindy 0.007320 (w=1.0000) | active terms: 12 | test 0.012530
+Epoch 7900 | recon 0.009372 | sindy 0.008162 (w=1.0000) | active terms: 12 | test 0.012924
+Epoch 7950 | recon 0.009908 | sindy 0.007152 (w=1.0000) | active terms: 12 | test 0.013696
+Epoch 8000 | recon 0.009257 | sindy 0.007947 (w=1.0000) | active terms: 12 | test 0.013521
+Epoch 8050 | recon 0.008913 | sindy 0.007584 (w=1.0000) | active terms: 12 | test 0.013429
+Epoch 8100 | recon 0.009909 | sindy 0.007379 (w=1.0000) | active terms: 12 | test 0.012864
+Epoch 8150 | recon 0.009973 | sindy 0.007362 (w=1.0000) | active terms: 12 | test 0.012949
+Epoch 8200 | recon 0.009142 | sindy 0.007098 (w=1.0000) | active terms: 12 | test 0.012524
+Epoch 8250 | recon 0.009680 | sindy 0.006857 (w=1.0000) | active terms: 12 | test 0.013025
+Epoch 8300 | recon 0.009405 | sindy 0.007620 (w=1.0000) | active terms: 12 | test 0.012101
+Epoch 8350 | recon 0.009954 | sindy 0.006683 (w=1.0000) | active terms: 12 | test 0.012609
+Epoch 8400 | recon 0.009400 | sindy 0.007261 (w=1.0000) | active terms: 12 | test 0.012515
+Epoch 8450 | recon 0.009742 | sindy 0.006803 (w=1.0000) | active terms: 12 | test 0.013442
+Epoch 8500 | recon 0.010148 | sindy 0.008450 (w=1.0000) | active terms: 12 | test 0.012645
+Epoch 8550 | recon 0.008787 | sindy 0.006607 (w=1.0000) | active terms: 12 | test 0.012580
+Epoch 8600 | recon 0.009203 | sindy 0.006813 (w=1.0000) | active terms: 12 | test 0.012339
+Epoch 8650 | recon 0.009605 | sindy 0.007218 (w=1.0000) | active terms: 12 | test 0.012240
+Epoch 8700 | recon 0.009700 | sindy 0.006628 (w=1.0000) | active terms: 12 | test 0.012420
+Epoch 8750 | recon 0.009616 | sindy 0.006802 (w=1.0000) | active terms: 12 | test 0.012561
+Epoch 8800 | recon 0.009129 | sindy 0.006991 (w=1.0000) | active terms: 12 | test 0.012971
+Epoch 8850 | recon 0.008820 | sindy 0.007034 (w=1.0000) | active terms: 12 | test 0.013458
+Epoch 8900 | recon 0.008978 | sindy 0.006507 (w=1.0000) | active terms: 12 | test 0.012932
+Epoch 8950 | recon 0.009177 | sindy 0.007400 (w=1.0000) | active terms: 12 | test 0.012361
+Epoch 9000 | recon 0.009770 | sindy 0.006811 (w=1.0000) | active terms: 12 | test 0.012343
+Epoch 9050 | recon 0.009692 | sindy 0.006691 (w=1.0000) | active terms: 12 | test 0.013536
+Epoch 9100 | recon 0.010081 | sindy 0.006435 (w=1.0000) | active terms: 12 | test 0.012666
+Epoch 9150 | recon 0.009127 | sindy 0.006472 (w=1.0000) | active terms: 12 | test 0.013372
+Epoch 9200 | recon 0.008978 | sindy 0.006049 (w=1.0000) | active terms: 12 | test 0.012473
+Epoch 9250 | recon 0.010141 | sindy 0.006944 (w=1.0000) | active terms: 12 | test 0.012574
+Epoch 9300 | recon 0.008977 | sindy 0.006532 (w=1.0000) | active terms: 12 | test 0.012625
+Epoch 9350 | recon 0.009075 | sindy 0.008430 (w=1.0000) | active terms: 12 | test 0.012610
+Epoch 9400 | recon 0.009122 | sindy 0.006023 (w=1.0000) | active terms: 12 | test 0.012556
+Epoch 9450 | recon 0.008878 | sindy 0.006367 (w=1.0000) | active terms: 12 | test 0.012160
+Epoch 9500 | recon 0.010306 | sindy 0.005948 (w=1.0000) | active terms: 12 | test 0.012512
+Epoch 9550 | recon 0.009645 | sindy 0.006568 (w=1.0000) | active terms: 12 | test 0.012574
+Epoch 9600 | recon 0.009474 | sindy 0.006575 (w=1.0000) | active terms: 12 | test 0.012315
+Epoch 9650 | recon 0.009362 | sindy 0.007131 (w=1.0000) | active terms: 12 | test 0.012254
+Epoch 9700 | recon 0.009093 | sindy 0.005948 (w=1.0000) | active terms: 12 | test 0.012282
+Epoch 9750 | recon 0.009902 | sindy 0.005445 (w=1.0000) | active terms: 12 | test 0.012194
+Epoch 9800 | recon 0.009255 | sindy 0.005608 (w=1.0000) | active terms: 12 | test 0.013230
+Epoch 9850 | recon 0.009044 | sindy 0.006203 (w=1.0000) | active terms: 12 | test 0.012352
+Epoch 9900 | recon 0.008826 | sindy 0.006260 (w=1.0000) | active terms: 12 | test 0.012411
+Epoch 9950 | recon 0.009388 | sindy 0.006853 (w=1.0000) | active terms: 12 | test 0.012336
+Epoch 9999 | recon 0.011441 | sindy 0.006190 (w=1.0000) | active terms: 12 | test 0.012151
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 0.001249 | active terms: 12
+Epoch   50 | deriv 0.000751 | active terms: 12
+Epoch  100 | deriv 0.000685 | active terms: 12
+Epoch  150 | deriv 0.000682 | active terms: 12
+Epoch  200 | deriv 0.000680 | active terms: 12
+Epoch  250 | deriv 0.000679 | active terms: 12
+Epoch  300 | deriv 0.000678 | active terms: 12
+Epoch  350 | deriv 0.000677 | active terms: 12
+Epoch  400 | deriv 0.000676 | active terms: 12
+Epoch  450 | deriv 0.000675 | active terms: 12
+Epoch  500 | deriv 0.000674 | active terms: 12
+Epoch  550 | deriv 0.000674 | active terms: 12
+Epoch  600 | deriv 0.000674 | active terms: 12
+Epoch  650 | deriv 0.000673 | active terms: 12
+Epoch  700 | deriv 0.000673 | active terms: 12
+Epoch  750 | deriv 0.000673 | active terms: 12
+Epoch  800 | deriv 0.000673 | active terms: 12
+Epoch  850 | deriv 0.000672 | active terms: 12
+Epoch  900 | deriv 0.000672 | active terms: 12
+Epoch  950 | deriv 0.000672 | active terms: 12
+Epoch 1000 | deriv 0.000672 | active terms: 12
+Epoch 1050 | deriv 0.000672 | active terms: 12
+Epoch 1100 | deriv 0.000672 | active terms: 12
+Epoch 1150 | deriv 0.000671 | active terms: 12
+Epoch 1200 | deriv 0.000671 | active terms: 12
+Epoch 1250 | deriv 0.000671 | active terms: 12
+Epoch 1300 | deriv 0.000671 | active terms: 12
+Epoch 1350 | deriv 0.000671 | active terms: 12
+Epoch 1400 | deriv 0.000671 | active terms: 12
+Epoch 1450 | deriv 0.000671 | active terms: 12
+Epoch 1500 | deriv 0.000671 | active terms: 12
+Epoch 1550 | deriv 0.000670 | active terms: 12
+Epoch 1600 | deriv 0.000670 | active terms: 12
+Epoch 1650 | deriv 0.000670 | active terms: 12
+Epoch 1700 | deriv 0.000670 | active terms: 12
+Epoch 1750 | deriv 0.000670 | active terms: 12
+Epoch 1800 | deriv 0.000670 | active terms: 12
+Epoch 1850 | deriv 0.000692 | active terms: 12
+Epoch 1900 | deriv 0.000696 | active terms: 12
+Epoch 1950 | deriv 0.000678 | active terms: 12
+Epoch 2000 | deriv 0.000670 | active terms: 12
+Epoch 2050 | deriv 0.000779 | active terms: 12
+Epoch 2100 | deriv 0.000814 | active terms: 12
+Epoch 2150 | deriv 0.000705 | active terms: 12
+Epoch 2200 | deriv 0.000677 | active terms: 12
+Epoch 2250 | deriv 0.000732 | active terms: 12
+Epoch 2300 | deriv 0.000700 | active terms: 12
+Epoch 2350 | deriv 0.000841 | active terms: 12
+Epoch 2400 | deriv 0.000703 | active terms: 12
+Epoch 2450 | deriv 0.000687 | active terms: 12
+Epoch 2500 | deriv 0.000729 | active terms: 12
+Epoch 2550 | deriv 0.000758 | active terms: 12
+Epoch 2600 | deriv 0.000768 | active terms: 12
+Epoch 2650 | deriv 0.000689 | active terms: 12
+Epoch 2700 | deriv 0.000718 | active terms: 12
+Epoch 2750 | deriv 0.000685 | active terms: 12
+Epoch 2800 | deriv 0.000692 | active terms: 12
+Epoch 2850 | deriv 0.000733 | active terms: 12
+Epoch 2900 | deriv 0.000708 | active terms: 12
+Epoch 2950 | deriv 0.000819 | active terms: 12
+Epoch 2999 | deriv 0.000746 | active terms: 12
+
+Refit phase: 600 epochs, lr=2.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.000758
+Refit   50 | deriv 0.000676
+Refit  100 | deriv 0.000669
+Refit  150 | deriv 0.000669
+Refit  200 | deriv 0.000669
+Refit  250 | deriv 0.000669
+Refit  300 | deriv 0.000669
+Refit  350 | deriv 0.000669
+Refit  400 | deriv 0.000669
+Refit  450 | deriv 0.000669
+Refit  500 | deriv 0.000669
+Refit  550 | deriv 0.000669
+Refit  599 | deriv 0.000669
+
+============================================================
+RESULT [sw1_dlr01_10k]
+  Recon: 4.00%  |  Forecast: 19.55%
+  Active terms: 12  |  Time: 228s
+  dz1/dt = 11.273 + 22.543*z1 - 35.232*z2 + 3.801*z3
+  dz2/dt = -1.543 + 10.887*z1 + 5.245*z2 + 19.360*z3
+  dz3/dt = 5.375 - 10.784*z1 - 17.675*z2 - 29.126*z3
+============================================================
+
+
+######################################################################
+[5/8] sw1_w1k_r5k: sw=1.0, dlr=0.05, warm=1000, ep=5000, refit=5000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020738 | sindy 10.682598 (w=0.0019) | active terms: 12 | test 0.022421
+Epoch  100 | recon 0.018213 | sindy 11.902695 (w=0.0044) | active terms: 12 | test 0.020242
+Epoch  150 | recon 0.015542 | sindy 8.088470 (w=0.0076) | active terms: 12 | test 0.018450
+Epoch  200 | recon 0.012973 | sindy 5.407813 (w=0.0117) | active terms: 12 | test 0.015539
+Epoch  250 | recon 0.011249 | sindy 5.345088 (w=0.0169) | active terms: 12 | test 0.014874
+Epoch  300 | recon 0.011267 | sindy 4.661206 (w=0.0236) | active terms: 12 | test 0.014502
+Epoch  350 | recon 0.011191 | sindy 4.208881 (w=0.0323) | active terms: 12 | test 0.015207
+Epoch  400 | recon 0.012753 | sindy 4.659741 (w=0.0433) | active terms: 12 | test 0.014567
+Epoch  450 | recon 0.020089 | sindy 7.064186 (w=0.0576) | active terms: 12 | test 0.021644
+Epoch  500 | recon 0.021037 | sindy 8.413905 (w=0.0759) | active terms: 12 | test 0.025315
+Epoch  550 | recon 0.023957 | sindy 12.026860 (w=0.0993) | active terms: 12 | test 0.032725
+Epoch  600 | recon 0.023968 | sindy 15.762979 (w=0.1295) | active terms: 12 | test 0.033635
+Epoch  650 | recon 0.032147 | sindy 16.591898 (w=0.1682) | active terms: 12 | test 0.036183
+Epoch  700 | recon 0.054805 | sindy 0.372148 (w=0.2179) | active terms: 12 | test 0.056641
+Epoch  750 | recon 0.050517 | sindy 0.212977 (w=0.2817) | active terms: 12 | test 0.053257
+Epoch  800 | recon 0.050976 | sindy 0.151575 (w=0.3636) | active terms: 12 | test 0.053509
+Epoch  850 | recon 0.050351 | sindy 0.126531 (w=0.4688) | active terms: 12 | test 0.052559
+Epoch  900 | recon 0.047365 | sindy 0.092418 (w=0.6039) | active terms: 12 | test 0.054527
+Epoch  950 | recon 0.048982 | sindy 0.068270 (w=0.7773) | active terms: 12 | test 0.052742
+--- Epoch 1000: E_sindy ramp complete (weight=1.0000) ---
+Epoch 1000 | recon 0.057651 | sindy 0.048993 (w=1.0000) | active terms: 12 | test 0.052808
+Epoch 1050 | recon 0.048499 | sindy 0.036733 (w=1.0000) | active terms: 12 | test 0.053099
+Epoch 1100 | recon 0.046777 | sindy 0.037536 (w=1.0000) | active terms: 12 | test 0.054255
+Epoch 1150 | recon 0.052870 | sindy 0.034068 (w=1.0000) | active terms: 12 | test 0.052673
+Epoch 1200 | recon 0.046260 | sindy 0.024964 (w=1.0000) | active terms: 12 | test 0.053872
+Epoch 1250 | recon 0.053672 | sindy 0.026902 (w=1.0000) | active terms: 12 | test 0.053099
+Epoch 1300 | recon 0.048267 | sindy 0.023766 (w=1.0000) | active terms: 12 | test 0.053302
+Epoch 1350 | recon 0.056355 | sindy 0.023318 (w=1.0000) | active terms: 12 | test 0.052623
+Epoch 1400 | recon 0.044541 | sindy 0.023325 (w=1.0000) | active terms: 12 | test 0.052624
+Epoch 1450 | recon 0.052243 | sindy 0.024172 (w=1.0000) | active terms: 12 | test 0.053196
+Epoch 1500 | recon 0.050183 | sindy 0.017649 (w=1.0000) | active terms: 12 | test 0.053305
+Epoch 1550 | recon 0.048637 | sindy 0.019257 (w=1.0000) | active terms: 12 | test 0.052489
+Epoch 1600 | recon 0.053051 | sindy 0.020218 (w=1.0000) | active terms: 12 | test 0.052808
+Epoch 1650 | recon 0.051682 | sindy 0.018380 (w=1.0000) | active terms: 12 | test 0.052723
+Epoch 1700 | recon 0.049605 | sindy 0.019426 (w=1.0000) | active terms: 12 | test 0.052887
+Epoch 1750 | recon 0.051239 | sindy 0.019200 (w=1.0000) | active terms: 12 | test 0.052894
+Epoch 1800 | recon 0.048162 | sindy 0.016487 (w=1.0000) | active terms: 12 | test 0.052765
+Epoch 1850 | recon 0.048951 | sindy 0.016855 (w=1.0000) | active terms: 12 | test 0.052675
+Epoch 1900 | recon 0.052470 | sindy 0.016696 (w=1.0000) | active terms: 12 | test 0.053114
+Epoch 1950 | recon 0.052040 | sindy 0.013677 (w=1.0000) | active terms: 12 | test 0.052601
+Epoch 2000 | recon 0.048657 | sindy 0.013500 (w=1.0000) | active terms: 12 | test 0.054006
+Epoch 2050 | recon 0.044423 | sindy 0.015262 (w=1.0000) | active terms: 12 | test 0.052768
+Epoch 2100 | recon 0.041126 | sindy 0.015649 (w=1.0000) | active terms: 12 | test 0.053137
+Epoch 2150 | recon 0.049492 | sindy 0.013409 (w=1.0000) | active terms: 12 | test 0.052608
+Epoch 2200 | recon 0.052215 | sindy 0.013526 (w=1.0000) | active terms: 12 | test 0.052697
+Epoch 2250 | recon 0.050163 | sindy 0.013318 (w=1.0000) | active terms: 12 | test 0.053682
+Epoch 2300 | recon 0.048551 | sindy 0.012300 (w=1.0000) | active terms: 12 | test 0.053030
+Epoch 2350 | recon 0.051658 | sindy 0.012907 (w=1.0000) | active terms: 12 | test 0.053019
+Epoch 2400 | recon 0.047592 | sindy 0.011316 (w=1.0000) | active terms: 12 | test 0.053496
+Epoch 2450 | recon 0.048814 | sindy 0.012818 (w=1.0000) | active terms: 12 | test 0.052828
+Epoch 2500 | recon 0.046381 | sindy 0.011754 (w=1.0000) | active terms: 12 | test 0.053113
+Epoch 2550 | recon 0.047424 | sindy 0.011852 (w=1.0000) | active terms: 12 | test 0.053117
+Epoch 2600 | recon 0.048601 | sindy 0.010018 (w=1.0000) | active terms: 12 | test 0.052926
+Epoch 2650 | recon 0.055220 | sindy 0.010076 (w=1.0000) | active terms: 12 | test 0.052949
+Epoch 2700 | recon 0.045070 | sindy 0.011789 (w=1.0000) | active terms: 12 | test 0.053394
+Epoch 2750 | recon 0.051549 | sindy 0.010585 (w=1.0000) | active terms: 12 | test 0.052910
+Epoch 2800 | recon 0.044299 | sindy 0.010431 (w=1.0000) | active terms: 12 | test 0.052853
+Epoch 2850 | recon 0.049053 | sindy 0.008607 (w=1.0000) | active terms: 12 | test 0.052894
+Epoch 2900 | recon 0.043208 | sindy 0.008527 (w=1.0000) | active terms: 12 | test 0.053031
+Epoch 2950 | recon 0.048113 | sindy 0.009948 (w=1.0000) | active terms: 12 | test 0.052650
+Epoch 3000 | recon 0.047175 | sindy 0.009217 (w=1.0000) | active terms: 12 | test 0.052929
+Epoch 3050 | recon 0.047448 | sindy 0.007535 (w=1.0000) | active terms: 12 | test 0.053005
+Epoch 3100 | recon 0.043450 | sindy 0.009472 (w=1.0000) | active terms: 12 | test 0.052556
+Epoch 3150 | recon 0.046578 | sindy 0.009314 (w=1.0000) | active terms: 12 | test 0.052908
+Epoch 3200 | recon 0.051086 | sindy 0.008520 (w=1.0000) | active terms: 12 | test 0.052981
+Epoch 3250 | recon 0.049074 | sindy 0.009168 (w=1.0000) | active terms: 12 | test 0.053104
+Epoch 3300 | recon 0.046061 | sindy 0.007690 (w=1.0000) | active terms: 12 | test 0.053380
+Epoch 3350 | recon 0.053238 | sindy 0.007709 (w=1.0000) | active terms: 12 | test 0.053726
+Epoch 3400 | recon 0.044243 | sindy 0.008676 (w=1.0000) | active terms: 12 | test 0.052684
+Epoch 3450 | recon 0.054157 | sindy 0.007026 (w=1.0000) | active terms: 12 | test 0.053361
+Epoch 3500 | recon 0.043944 | sindy 0.005650 (w=1.0000) | active terms: 12 | test 0.052816
+Epoch 3550 | recon 0.048199 | sindy 0.007467 (w=1.0000) | active terms: 12 | test 0.053104
+Epoch 3600 | recon 0.049218 | sindy 0.006773 (w=1.0000) | active terms: 12 | test 0.052883
+Epoch 3650 | recon 0.045821 | sindy 0.006379 (w=1.0000) | active terms: 12 | test 0.053420
+Epoch 3700 | recon 0.049362 | sindy 0.006913 (w=1.0000) | active terms: 12 | test 0.052872
+Epoch 3750 | recon 0.042408 | sindy 0.005794 (w=1.0000) | active terms: 12 | test 0.053126
+Epoch 3800 | recon 0.050955 | sindy 0.006209 (w=1.0000) | active terms: 12 | test 0.053045
+Epoch 3850 | recon 0.049439 | sindy 0.005357 (w=1.0000) | active terms: 12 | test 0.053063
+Epoch 3900 | recon 0.047807 | sindy 0.006216 (w=1.0000) | active terms: 12 | test 0.052678
+Epoch 3950 | recon 0.050128 | sindy 0.005700 (w=1.0000) | active terms: 12 | test 0.053013
+Epoch 4000 | recon 0.047763 | sindy 0.004823 (w=1.0000) | active terms: 12 | test 0.052815
+Epoch 4050 | recon 0.048812 | sindy 0.005451 (w=1.0000) | active terms: 12 | test 0.053014
+Epoch 4100 | recon 0.049302 | sindy 0.006368 (w=1.0000) | active terms: 12 | test 0.053289
+Epoch 4150 | recon 0.045762 | sindy 0.004949 (w=1.0000) | active terms: 12 | test 0.052967
+Epoch 4200 | recon 0.050263 | sindy 0.005468 (w=1.0000) | active terms: 12 | test 0.052869
+Epoch 4250 | recon 0.046371 | sindy 0.004871 (w=1.0000) | active terms: 12 | test 0.053071
+Epoch 4300 | recon 0.047579 | sindy 0.004405 (w=1.0000) | active terms: 12 | test 0.052909
+Epoch 4350 | recon 0.048958 | sindy 0.004508 (w=1.0000) | active terms: 12 | test 0.052840
+Epoch 4400 | recon 0.047659 | sindy 0.004149 (w=1.0000) | active terms: 12 | test 0.054228
+Epoch 4450 | recon 0.044263 | sindy 0.004849 (w=1.0000) | active terms: 12 | test 0.053410
+Epoch 4500 | recon 0.048399 | sindy 0.004097 (w=1.0000) | active terms: 12 | test 0.052854
+Epoch 4550 | recon 0.048736 | sindy 0.004015 (w=1.0000) | active terms: 12 | test 0.053273
+Epoch 4600 | recon 0.048518 | sindy 0.004238 (w=1.0000) | active terms: 12 | test 0.052437
+Epoch 4650 | recon 0.049667 | sindy 0.004421 (w=1.0000) | active terms: 12 | test 0.052528
+Epoch 4700 | recon 0.054063 | sindy 0.003571 (w=1.0000) | active terms: 12 | test 0.053230
+Epoch 4750 | recon 0.048821 | sindy 0.003920 (w=1.0000) | active terms: 12 | test 0.053205
+Epoch 4800 | recon 0.048106 | sindy 0.003502 (w=1.0000) | active terms: 12 | test 0.052693
+Epoch 4850 | recon 0.046083 | sindy 0.003665 (w=1.0000) | active terms: 12 | test 0.053475
+Epoch 4900 | recon 0.049512 | sindy 0.003184 (w=1.0000) | active terms: 12 | test 0.052815
+Epoch 4950 | recon 0.047708 | sindy 0.003442 (w=1.0000) | active terms: 12 | test 0.052644
+Epoch 4999 | recon 0.050722 | sindy 0.003627 (w=1.0000) | active terms: 12 | test 0.053124
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 5000 epochs
+Epoch    0 | deriv 0.000060 | active terms: 12
+Epoch   50 | deriv 0.000036 | active terms: 12
+Epoch  100 | deriv 0.000011 | active terms: 12
+Epoch  150 | deriv 0.000011 | active terms: 12
+Epoch  200 | deriv 0.000011 | active terms: 12
+Epoch  250 | deriv 0.000011 | active terms: 12
+Epoch  300 | deriv 0.000011 | active terms: 12
+Epoch  350 | deriv 0.000011 | active terms: 12
+Epoch  400 | deriv 0.000011 | active terms: 12
+Epoch  450 | deriv 0.000011 | active terms: 12
+Epoch  500 | deriv 0.000011 | active terms: 12
+Epoch  550 | deriv 0.000011 | active terms: 12
+Epoch  600 | deriv 0.000011 | active terms: 12
+Epoch  650 | deriv 0.000011 | active terms: 12
+Epoch  700 | deriv 0.000011 | active terms: 12
+Epoch  750 | deriv 0.000011 | active terms: 12
+Epoch  800 | deriv 0.000011 | active terms: 12
+Epoch  850 | deriv 0.000011 | active terms: 12
+Epoch  900 | deriv 0.000011 | active terms: 12
+Epoch  950 | deriv 0.000011 | active terms: 12
+Epoch 1000 | deriv 0.000011 | active terms: 12
+Epoch 1050 | deriv 0.000011 | active terms: 12
+Epoch 1100 | deriv 0.000011 | active terms: 12
+Epoch 1150 | deriv 0.000011 | active terms: 12
+Epoch 1200 | deriv 0.000011 | active terms: 12
+Epoch 1250 | deriv 0.000011 | active terms: 12
+Epoch 1300 | deriv 0.000011 | active terms: 12
+Epoch 1350 | deriv 0.000011 | active terms: 12
+Epoch 1400 | deriv 0.000011 | active terms: 12
+Epoch 1450 | deriv 0.000011 | active terms: 12
+Epoch 1500 | deriv 0.000011 | active terms: 12
+Epoch 1550 | deriv 0.000011 | active terms: 12
+Epoch 1600 | deriv 0.000011 | active terms: 12
+Epoch 1650 | deriv 0.000011 | active terms: 12
+Epoch 1700 | deriv 0.000011 | active terms: 12
+Epoch 1750 | deriv 0.000011 | active terms: 12
+Epoch 1800 | deriv 0.000011 | active terms: 12
+Epoch 1850 | deriv 0.000011 | active terms: 12
+Epoch 1900 | deriv 0.000047 | active terms: 12
+Epoch 1950 | deriv 0.000029 | active terms: 12
+Epoch 2000 | deriv 0.000122 | active terms: 12
+Epoch 2050 | deriv 0.000025 | active terms: 12
+Epoch 2100 | deriv 0.000032 | active terms: 12
+Epoch 2150 | deriv 0.000015 | active terms: 12
+Epoch 2200 | deriv 0.000027 | active terms: 12
+Epoch 2250 | deriv 0.000025 | active terms: 12
+Epoch 2300 | deriv 0.000013 | active terms: 12
+Epoch 2350 | deriv 0.000055 | active terms: 12
+Epoch 2400 | deriv 0.000036 | active terms: 12
+Epoch 2450 | deriv 0.000039 | active terms: 12
+Epoch 2500 | deriv 0.000018 | active terms: 12
+Epoch 2550 | deriv 0.000032 | active terms: 12
+Epoch 2600 | deriv 0.000017 | active terms: 12
+Epoch 2650 | deriv 0.000022 | active terms: 12
+Epoch 2700 | deriv 0.000017 | active terms: 12
+Epoch 2750 | deriv 0.000053 | active terms: 12
+Epoch 2800 | deriv 0.000037 | active terms: 12
+Epoch 2850 | deriv 0.000066 | active terms: 12
+Epoch 2900 | deriv 0.000041 | active terms: 12
+Epoch 2950 | deriv 0.000012 | active terms: 12
+Epoch 3000 | deriv 0.000024 | active terms: 12
+Epoch 3050 | deriv 0.000036 | active terms: 12
+Epoch 3100 | deriv 0.000042 | active terms: 12
+Epoch 3150 | deriv 0.000024 | active terms: 12
+Epoch 3200 | deriv 0.000045 | active terms: 12
+Epoch 3250 | deriv 0.000021 | active terms: 12
+Epoch 3300 | deriv 0.000041 | active terms: 12
+Epoch 3350 | deriv 0.000032 | active terms: 12
+Epoch 3400 | deriv 0.000014 | active terms: 12
+Epoch 3450 | deriv 0.000059 | active terms: 12
+Epoch 3500 | deriv 0.000019 | active terms: 12
+Epoch 3550 | deriv 0.000033 | active terms: 12
+Epoch 3600 | deriv 0.000015 | active terms: 12
+Epoch 3650 | deriv 0.000012 | active terms: 12
+Epoch 3700 | deriv 0.000031 | active terms: 12
+Epoch 3750 | deriv 0.000062 | active terms: 12
+Epoch 3800 | deriv 0.000015 | active terms: 12
+Epoch 3850 | deriv 0.000011 | active terms: 12
+Epoch 3900 | deriv 0.000024 | active terms: 12
+Epoch 3950 | deriv 0.000038 | active terms: 12
+Epoch 4000 | deriv 0.000024 | active terms: 12
+Epoch 4050 | deriv 0.000028 | active terms: 12
+Epoch 4100 | deriv 0.000022 | active terms: 12
+Epoch 4150 | deriv 0.000057 | active terms: 12
+Epoch 4200 | deriv 0.000032 | active terms: 12
+Epoch 4250 | deriv 0.000012 | active terms: 12
+Epoch 4300 | deriv 0.000039 | active terms: 12
+Epoch 4350 | deriv 0.000058 | active terms: 12
+Epoch 4400 | deriv 0.000015 | active terms: 12
+Epoch 4450 | deriv 0.000027 | active terms: 12
+Epoch 4500 | deriv 0.000040 | active terms: 12
+Epoch 4550 | deriv 0.000046 | active terms: 12
+Epoch 4600 | deriv 0.000031 | active terms: 12
+Epoch 4650 | deriv 0.000050 | active terms: 12
+Epoch 4700 | deriv 0.000061 | active terms: 12
+Epoch 4750 | deriv 0.000042 | active terms: 12
+Epoch 4800 | deriv 0.000026 | active terms: 12
+Epoch 4850 | deriv 0.000027 | active terms: 12
+Epoch 4900 | deriv 0.000034 | active terms: 12
+Epoch 4950 | deriv 0.000031 | active terms: 12
+Epoch 4999 | deriv 0.000024 | active terms: 12
+
+Refit phase: 1000 epochs, lr=1.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.000028
+Refit   50 | deriv 0.000013
+Refit  100 | deriv 0.000011
+Refit  150 | deriv 0.000011
+Refit  200 | deriv 0.000011
+Refit  250 | deriv 0.000011
+Refit  300 | deriv 0.000011
+Refit  350 | deriv 0.000011
+Refit  400 | deriv 0.000011
+Refit  450 | deriv 0.000011
+Refit  500 | deriv 0.000011
+Refit  550 | deriv 0.000011
+Refit  600 | deriv 0.000011
+Refit  650 | deriv 0.000011
+Refit  700 | deriv 0.000011
+Refit  750 | deriv 0.000011
+Refit  800 | deriv 0.000011
+Refit  850 | deriv 0.000011
+Refit  900 | deriv 0.000011
+Refit  950 | deriv 0.000011
+Refit  999 | deriv 0.000011
+
+============================================================
+RESULT [sw1_w1k_r5k]
+  Recon: 11.04%  |  Forecast: DIVERGED
+  Active terms: 12  |  Time: 133s
+  dz1/dt = 8.838 + 10.749*z1 - 19.571*z2 + 12.737*z3
+  dz2/dt = 2.736 + 15.337*z1 + 0.951*z2 + 19.183*z3
+  dz3/dt = 8.347 - 9.405*z1 - 22.355*z2 - 9.826*z3
+============================================================
+
+
+######################################################################
+[6/8] sw1_l1e-4: sw=1.0, dlr=0.05, warm=2500, ep=5000, refit=3000, l1=0.0001
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020717 | sindy 10.747585 (w=0.0007) | active terms: 12 | test 0.022396
+Epoch  100 | recon 0.018091 | sindy 12.408977 (w=0.0015) | active terms: 12 | test 0.020286
+Epoch  150 | recon 0.015158 | sindy 11.618571 (w=0.0024) | active terms: 12 | test 0.018363
+Epoch  200 | recon 0.014302 | sindy 8.414895 (w=0.0033) | active terms: 12 | test 0.016335
+Epoch  250 | recon 0.012163 | sindy 6.592283 (w=0.0044) | active terms: 12 | test 0.015455
+Epoch  300 | recon 0.011493 | sindy 5.456995 (w=0.0056) | active terms: 12 | test 0.014561
+Epoch  350 | recon 0.010747 | sindy 4.603413 (w=0.0069) | active terms: 12 | test 0.014551
+Epoch  400 | recon 0.011784 | sindy 4.087309 (w=0.0083) | active terms: 12 | test 0.013601
+Epoch  450 | recon 0.009522 | sindy 3.792179 (w=0.0099) | active terms: 12 | test 0.013717
+Epoch  500 | recon 0.009786 | sindy 3.713211 (w=0.0117) | active terms: 12 | test 0.013531
+Epoch  550 | recon 0.010468 | sindy 3.849545 (w=0.0136) | active terms: 12 | test 0.013485
+Epoch  600 | recon 0.009753 | sindy 4.079489 (w=0.0157) | active terms: 12 | test 0.013307
+Epoch  650 | recon 0.009951 | sindy 3.599128 (w=0.0181) | active terms: 12 | test 0.013259
+Epoch  700 | recon 0.009354 | sindy 3.544961 (w=0.0207) | active terms: 12 | test 0.012983
+Epoch  750 | recon 0.010920 | sindy 3.311301 (w=0.0236) | active terms: 12 | test 0.014720
+Epoch  800 | recon 0.012507 | sindy 4.278689 (w=0.0268) | active terms: 12 | test 0.017740
+Epoch  850 | recon 0.014943 | sindy 7.069601 (w=0.0303) | active terms: 12 | test 0.019912
+Epoch  900 | recon 0.017787 | sindy 10.541166 (w=0.0343) | active terms: 12 | test 0.022692
+Epoch  950 | recon 0.023984 | sindy 11.790068 (w=0.0386) | active terms: 12 | test 0.026365
+Epoch 1000 | recon 0.019792 | sindy 12.173460 (w=0.0433) | active terms: 12 | test 0.026808
+Epoch 1050 | recon 0.023721 | sindy 11.518030 (w=0.0486) | active terms: 12 | test 0.023875
+Epoch 1100 | recon 0.030056 | sindy 4.576519 (w=0.0544) | active terms: 12 | test 0.032857
+Epoch 1150 | recon 0.023770 | sindy 0.214693 (w=0.0609) | active terms: 12 | test 0.026653
+Epoch 1200 | recon 0.024243 | sindy 0.126573 (w=0.0680) | active terms: 12 | test 0.026894
+Epoch 1250 | recon 0.021201 | sindy 0.110980 (w=0.0759) | active terms: 12 | test 0.022614
+Epoch 1300 | recon 0.020781 | sindy 0.093940 (w=0.0845) | active terms: 12 | test 0.019791
+Epoch 1350 | recon 0.019370 | sindy 0.085596 (w=0.0942) | active terms: 12 | test 0.019741
+Epoch 1400 | recon 0.020526 | sindy 0.077546 (w=0.1048) | active terms: 12 | test 0.023144
+Epoch 1450 | recon 0.014864 | sindy 0.070779 (w=0.1165) | active terms: 12 | test 0.019032
+Epoch 1500 | recon 0.015270 | sindy 0.066962 (w=0.1295) | active terms: 12 | test 0.019206
+Epoch 1550 | recon 0.017360 | sindy 0.064242 (w=0.1438) | active terms: 12 | test 0.024750
+Epoch 1600 | recon 0.014882 | sindy 0.059457 (w=0.1596) | active terms: 12 | test 0.020084
+Epoch 1650 | recon 0.017391 | sindy 0.057425 (w=0.1771) | active terms: 12 | test 0.019943
+Epoch 1700 | recon 0.016882 | sindy 0.054728 (w=0.1965) | active terms: 12 | test 0.020139
+Epoch 1750 | recon 0.014798 | sindy 0.048656 (w=0.2179) | active terms: 12 | test 0.020101
+Epoch 1800 | recon 0.015857 | sindy 0.046577 (w=0.2415) | active terms: 12 | test 0.023035
+Epoch 1850 | recon 0.015598 | sindy 0.044729 (w=0.2676) | active terms: 12 | test 0.022700
+Epoch 1900 | recon 0.015441 | sindy 0.042526 (w=0.2965) | active terms: 12 | test 0.020620
+Epoch 1950 | recon 0.017573 | sindy 0.047845 (w=0.3283) | active terms: 12 | test 0.023459
+Epoch 2000 | recon 0.016020 | sindy 0.043111 (w=0.3636) | active terms: 12 | test 0.020514
+Epoch 2050 | recon 0.016418 | sindy 0.043270 (w=0.4025) | active terms: 12 | test 0.035675
+Epoch 2100 | recon 0.018123 | sindy 0.047577 (w=0.4456) | active terms: 12 | test 0.029101
+Epoch 2150 | recon 0.016809 | sindy 0.047408 (w=0.4932) | active terms: 12 | test 0.021945
+Epoch 2200 | recon 0.019019 | sindy 0.050662 (w=0.5458) | active terms: 12 | test 0.023713
+Epoch 2250 | recon 0.020728 | sindy 0.060205 (w=0.6039) | active terms: 12 | test 0.024413
+Epoch 2300 | recon 0.019911 | sindy 0.076993 (w=0.6681) | active terms: 12 | test 0.028522
+Epoch 2350 | recon 0.018632 | sindy 0.133779 (w=0.7391) | active terms: 12 | test 0.028170
+Epoch 2400 | recon 0.026432 | sindy 0.311084 (w=0.8175) | active terms: 12 | test 0.034257
+Epoch 2450 | recon 0.028166 | sindy 0.373623 (w=0.9042) | active terms: 12 | test 0.039409
+--- Epoch 2500: E_sindy ramp complete (weight=1.0000) ---
+Epoch 2500 | recon 0.027607 | sindy 0.379054 (w=1.0000) | active terms: 12 | test 0.038587
+Epoch 2550 | recon 0.027708 | sindy 0.554936 (w=1.0000) | active terms: 12 | test 0.040814
+Epoch 2600 | recon 0.023700 | sindy 0.393130 (w=1.0000) | active terms: 12 | test 0.038402
+Epoch 2650 | recon 0.027495 | sindy 0.458171 (w=1.0000) | active terms: 12 | test 0.034015
+Epoch 2700 | recon 0.020568 | sindy 0.353166 (w=1.0000) | active terms: 12 | test 0.038546
+Epoch 2750 | recon 0.024084 | sindy 0.332543 (w=1.0000) | active terms: 12 | test 0.033654
+Epoch 2800 | recon 0.020131 | sindy 0.314144 (w=1.0000) | active terms: 12 | test 0.030186
+Epoch 2850 | recon 0.021477 | sindy 0.244158 (w=1.0000) | active terms: 12 | test 0.046211
+Epoch 2900 | recon 0.017488 | sindy 0.258231 (w=1.0000) | active terms: 12 | test 0.034139
+Epoch 2950 | recon 0.017332 | sindy 0.233344 (w=1.0000) | active terms: 12 | test 0.033277
+Epoch 3000 | recon 0.015079 | sindy 0.205513 (w=1.0000) | active terms: 12 | test 0.028878
+Epoch 3050 | recon 0.017398 | sindy 0.199630 (w=1.0000) | active terms: 12 | test 0.028726
+Epoch 3100 | recon 0.023252 | sindy 0.189195 (w=1.0000) | active terms: 12 | test 0.033142
+Epoch 3150 | recon 0.013923 | sindy 0.202359 (w=1.0000) | active terms: 12 | test 0.030274
+Epoch 3200 | recon 0.014248 | sindy 0.185136 (w=1.0000) | active terms: 12 | test 0.029997
+Epoch 3250 | recon 0.015233 | sindy 0.165170 (w=1.0000) | active terms: 12 | test 0.027579
+Epoch 3300 | recon 0.018340 | sindy 0.193375 (w=1.0000) | active terms: 12 | test 0.027622
+Epoch 3350 | recon 0.015889 | sindy 0.159314 (w=1.0000) | active terms: 12 | test 0.023873
+Epoch 3400 | recon 0.012663 | sindy 0.161349 (w=1.0000) | active terms: 12 | test 0.029734
+Epoch 3450 | recon 0.013717 | sindy 0.169829 (w=1.0000) | active terms: 12 | test 0.026345
+Epoch 3500 | recon 0.017622 | sindy 0.195177 (w=1.0000) | active terms: 12 | test 0.021530
+Epoch 3550 | recon 0.015959 | sindy 0.169191 (w=1.0000) | active terms: 12 | test 0.024982
+Epoch 3600 | recon 0.013635 | sindy 0.159159 (w=1.0000) | active terms: 12 | test 0.027439
+Epoch 3650 | recon 0.013348 | sindy 0.186065 (w=1.0000) | active terms: 12 | test 0.022528
+Epoch 3700 | recon 0.016606 | sindy 0.163636 (w=1.0000) | active terms: 12 | test 0.021094
+Epoch 3750 | recon 0.013795 | sindy 0.172447 (w=1.0000) | active terms: 12 | test 0.022151
+Epoch 3800 | recon 0.014230 | sindy 0.205127 (w=1.0000) | active terms: 12 | test 0.023807
+Epoch 3850 | recon 0.014717 | sindy 0.177079 (w=1.0000) | active terms: 12 | test 0.029410
+Epoch 3900 | recon 0.013341 | sindy 0.201578 (w=1.0000) | active terms: 12 | test 0.023279
+Epoch 3950 | recon 0.018146 | sindy 0.209752 (w=1.0000) | active terms: 12 | test 0.021571
+Epoch 4000 | recon 0.013217 | sindy 0.191297 (w=1.0000) | active terms: 12 | test 0.023721
+Epoch 4050 | recon 0.014413 | sindy 0.187668 (w=1.0000) | active terms: 12 | test 0.023450
+Epoch 4100 | recon 0.014782 | sindy 0.221004 (w=1.0000) | active terms: 12 | test 0.019685
+Epoch 4150 | recon 0.014801 | sindy 0.238636 (w=1.0000) | active terms: 12 | test 0.022534
+Epoch 4200 | recon 0.012874 | sindy 0.241905 (w=1.0000) | active terms: 12 | test 0.025878
+Epoch 4250 | recon 0.013980 | sindy 0.214720 (w=1.0000) | active terms: 12 | test 0.024242
+Epoch 4300 | recon 0.019865 | sindy 0.250560 (w=1.0000) | active terms: 12 | test 0.019847
+Epoch 4350 | recon 0.013919 | sindy 0.291359 (w=1.0000) | active terms: 12 | test 0.019512
+Epoch 4400 | recon 0.014901 | sindy 0.317768 (w=1.0000) | active terms: 12 | test 0.019852
+Epoch 4450 | recon 0.014183 | sindy 0.296451 (w=1.0000) | active terms: 12 | test 0.020441
+Epoch 4500 | recon 0.013943 | sindy 0.342446 (w=1.0000) | active terms: 12 | test 0.023021
+Epoch 4550 | recon 0.016242 | sindy 0.383560 (w=1.0000) | active terms: 12 | test 0.025262
+Epoch 4600 | recon 0.014179 | sindy 0.485724 (w=1.0000) | active terms: 12 | test 0.022664
+Epoch 4650 | recon 0.016166 | sindy 0.698343 (w=1.0000) | active terms: 12 | test 0.020407
+Epoch 4700 | recon 0.012177 | sindy 0.608193 (w=1.0000) | active terms: 12 | test 0.018244
+Epoch 4750 | recon 0.016330 | sindy 0.755299 (w=1.0000) | active terms: 12 | test 0.017613
+Epoch 4800 | recon 0.011874 | sindy 0.685200 (w=1.0000) | active terms: 12 | test 0.017263
+Epoch 4850 | recon 0.012690 | sindy 0.658052 (w=1.0000) | active terms: 12 | test 0.015636
+Epoch 4900 | recon 0.010382 | sindy 0.584386 (w=1.0000) | active terms: 12 | test 0.015329
+Epoch 4950 | recon 0.010955 | sindy 0.793108 (w=1.0000) | active terms: 12 | test 0.015934
+Epoch 4999 | recon 0.011291 | sindy 0.647524 (w=1.0000) | active terms: 12 | test 0.017026
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 0.173938 | active terms: 12
+Epoch   50 | deriv 0.165059 | active terms: 12
+Epoch  100 | deriv 0.162923 | active terms: 12
+Epoch  150 | deriv 0.161259 | active terms: 12
+Epoch  200 | deriv 0.159925 | active terms: 12
+Epoch  250 | deriv 0.158816 | active terms: 12
+Epoch  300 | deriv 0.157909 | active terms: 12
+Epoch  350 | deriv 0.157195 | active terms: 12
+Epoch  400 | deriv 0.156655 | active terms: 12
+Epoch  450 | deriv 0.156261 | active terms: 12
+Epoch  500 | deriv 0.155984 | active terms: 12
+Epoch  550 | deriv 0.155796 | active terms: 12
+Epoch  600 | deriv 0.155672 | active terms: 12
+Epoch  650 | deriv 0.155593 | active terms: 12
+Epoch  700 | deriv 0.155544 | active terms: 12
+Epoch  750 | deriv 0.155514 | active terms: 12
+Epoch  800 | deriv 0.155497 | active terms: 12
+Epoch  850 | deriv 0.155487 | active terms: 12
+Epoch  900 | deriv 0.155481 | active terms: 12
+Epoch  950 | deriv 0.155478 | active terms: 12
+Epoch 1000 | deriv 0.155476 | active terms: 12
+Epoch 1050 | deriv 0.155475 | active terms: 12
+Epoch 1100 | deriv 0.155491 | active terms: 12
+Epoch 1150 | deriv 0.155474 | active terms: 12
+Epoch 1200 | deriv 0.155474 | active terms: 12
+Epoch 1250 | deriv 0.155581 | active terms: 12
+Epoch 1300 | deriv 0.155490 | active terms: 12
+Epoch 1350 | deriv 0.155508 | active terms: 12
+Epoch 1400 | deriv 0.155475 | active terms: 12
+Epoch 1450 | deriv 0.155506 | active terms: 12
+Epoch 1500 | deriv 0.155485 | active terms: 12
+Epoch 1550 | deriv 0.155494 | active terms: 12
+Epoch 1600 | deriv 0.155495 | active terms: 12
+Epoch 1650 | deriv 0.155494 | active terms: 12
+Epoch 1700 | deriv 0.155480 | active terms: 12
+Epoch 1750 | deriv 0.155478 | active terms: 12
+Epoch 1800 | deriv 0.155488 | active terms: 12
+Epoch 1850 | deriv 0.155504 | active terms: 12
+Epoch 1900 | deriv 0.155528 | active terms: 12
+Epoch 1950 | deriv 0.155476 | active terms: 12
+Epoch 2000 | deriv 0.155484 | active terms: 12
+Epoch 2050 | deriv 0.155493 | active terms: 12
+Epoch 2100 | deriv 0.155478 | active terms: 12
+Epoch 2150 | deriv 0.155480 | active terms: 12
+Epoch 2200 | deriv 0.155498 | active terms: 12
+Epoch 2250 | deriv 0.155479 | active terms: 12
+Epoch 2300 | deriv 0.155500 | active terms: 12
+Epoch 2350 | deriv 0.155507 | active terms: 12
+Epoch 2400 | deriv 0.155498 | active terms: 12
+Epoch 2450 | deriv 0.155480 | active terms: 12
+Epoch 2500 | deriv 0.155503 | active terms: 12
+Epoch 2550 | deriv 0.155479 | active terms: 12
+Epoch 2600 | deriv 0.155507 | active terms: 12
+Epoch 2650 | deriv 0.156238 | active terms: 12
+Epoch 2700 | deriv 0.155488 | active terms: 12
+Epoch 2750 | deriv 0.155477 | active terms: 12
+Epoch 2800 | deriv 0.155605 | active terms: 12
+Epoch 2850 | deriv 0.155481 | active terms: 12
+Epoch 2900 | deriv 0.155498 | active terms: 12
+Epoch 2950 | deriv 0.155490 | active terms: 12
+Epoch 2999 | deriv 0.155479 | active terms: 12
+
+Refit phase: 600 epochs, lr=1.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.155478
+Refit   50 | deriv 0.155475
+Refit  100 | deriv 0.155473
+Refit  150 | deriv 0.155473
+Refit  200 | deriv 0.155473
+Refit  250 | deriv 0.155473
+Refit  300 | deriv 0.155473
+Refit  350 | deriv 0.155473
+Refit  400 | deriv 0.155473
+Refit  450 | deriv 0.155473
+Refit  500 | deriv 0.155473
+Refit  550 | deriv 0.155473
+Refit  599 | deriv 0.155473
+
+============================================================
+RESULT [sw1_l1e-4]
+  Recon: 5.25%  |  Forecast: DIVERGED
+  Active terms: 12  |  Time: 125s
+  dz1/dt = 12.157 + 6.971*z1 + 6.306*z2 + 27.174*z3
+  dz2/dt = 4.917 + 12.106*z1 - 8.357*z2 + 10.083*z3
+  dz3/dt = -0.462 - 24.877*z1 + 28.695*z2 + 1.399*z3
+============================================================
+
+
+######################################################################
+[7/8] sw05_dlr01: sw=0.5, dlr=0.1, warm=2500, ep=5000, refit=3000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020716 | sindy 10.720829 (w=0.0004) | active terms: 12 | test 0.022386
+Epoch  100 | recon 0.018069 | sindy 12.475754 (w=0.0008) | active terms: 12 | test 0.020293
+Epoch  150 | recon 0.015199 | sindy 12.168731 (w=0.0012) | active terms: 12 | test 0.018384
+Epoch  200 | recon 0.014211 | sindy 9.503297 (w=0.0017) | active terms: 12 | test 0.016798
+Epoch  250 | recon 0.012373 | sindy 7.601203 (w=0.0022) | active terms: 12 | test 0.015627
+Epoch  300 | recon 0.011812 | sindy 6.086232 (w=0.0028) | active terms: 12 | test 0.014782
+Epoch  350 | recon 0.010806 | sindy 5.047709 (w=0.0034) | active terms: 12 | test 0.014629
+Epoch  400 | recon 0.011896 | sindy 4.439648 (w=0.0042) | active terms: 12 | test 0.013588
+Epoch  450 | recon 0.009686 | sindy 4.126653 (w=0.0050) | active terms: 12 | test 0.013567
+Epoch  500 | recon 0.009879 | sindy 3.845887 (w=0.0058) | active terms: 12 | test 0.013283
+Epoch  550 | recon 0.010427 | sindy 3.761380 (w=0.0068) | active terms: 12 | test 0.013142
+Epoch  600 | recon 0.009467 | sindy 3.668767 (w=0.0079) | active terms: 12 | test 0.013018
+Epoch  650 | recon 0.009668 | sindy 3.012190 (w=0.0091) | active terms: 12 | test 0.012985
+Epoch  700 | recon 0.009424 | sindy 2.994336 (w=0.0104) | active terms: 12 | test 0.012657
+Epoch  750 | recon 0.009871 | sindy 3.021865 (w=0.0118) | active terms: 12 | test 0.013169
+Epoch  800 | recon 0.009731 | sindy 3.028054 (w=0.0134) | active terms: 12 | test 0.013237
+Epoch  850 | recon 0.009743 | sindy 2.748971 (w=0.0152) | active terms: 12 | test 0.012783
+Epoch  900 | recon 0.011326 | sindy 2.780952 (w=0.0171) | active terms: 12 | test 0.015680
+Epoch  950 | recon 0.013179 | sindy 3.922090 (w=0.0193) | active terms: 12 | test 0.016534
+Epoch 1000 | recon 0.013785 | sindy 5.554898 (w=0.0217) | active terms: 12 | test 0.021808
+Epoch 1050 | recon 0.018980 | sindy 7.042462 (w=0.0243) | active terms: 12 | test 0.024816
+Epoch 1100 | recon 0.018639 | sindy 7.907719 (w=0.0272) | active terms: 12 | test 0.022719
+Epoch 1150 | recon 0.024043 | sindy 8.358564 (w=0.0304) | active terms: 12 | test 0.021882
+Epoch 1200 | recon 0.017215 | sindy 8.149534 (w=0.0340) | active terms: 12 | test 0.018712
+Epoch 1250 | recon 0.016557 | sindy 6.853645 (w=0.0379) | active terms: 12 | test 0.021743
+Epoch 1300 | recon 0.028950 | sindy 0.549110 (w=0.0423) | active terms: 12 | test 0.030066
+Epoch 1350 | recon 0.030262 | sindy 0.441369 (w=0.0471) | active terms: 12 | test 0.026946
+Epoch 1400 | recon 0.025628 | sindy 0.340416 (w=0.0524) | active terms: 12 | test 0.025420
+Epoch 1450 | recon 0.022578 | sindy 0.327697 (w=0.0583) | active terms: 12 | test 0.023693
+Epoch 1500 | recon 0.024498 | sindy 0.221881 (w=0.0647) | active terms: 12 | test 0.024101
+Epoch 1550 | recon 0.025765 | sindy 0.215961 (w=0.0719) | active terms: 12 | test 0.027145
+Epoch 1600 | recon 0.019517 | sindy 0.200412 (w=0.0798) | active terms: 12 | test 0.021956
+Epoch 1650 | recon 0.019376 | sindy 0.177360 (w=0.0886) | active terms: 12 | test 0.022049
+Epoch 1700 | recon 0.023095 | sindy 0.141131 (w=0.0982) | active terms: 12 | test 0.021250
+Epoch 1750 | recon 0.020812 | sindy 0.126064 (w=0.1089) | active terms: 12 | test 0.021164
+Epoch 1800 | recon 0.019781 | sindy 0.125687 (w=0.1207) | active terms: 12 | test 0.020266
+Epoch 1850 | recon 0.017619 | sindy 0.145484 (w=0.1338) | active terms: 12 | test 0.020670
+Epoch 1900 | recon 0.018144 | sindy 0.118137 (w=0.1482) | active terms: 12 | test 0.020140
+Epoch 1950 | recon 0.017047 | sindy 0.110993 (w=0.1642) | active terms: 12 | test 0.019920
+Epoch 2000 | recon 0.016825 | sindy 0.122747 (w=0.1818) | active terms: 12 | test 0.019947
+Epoch 2050 | recon 0.017260 | sindy 0.090582 (w=0.2013) | active terms: 12 | test 0.020467
+Epoch 2100 | recon 0.016907 | sindy 0.095502 (w=0.2228) | active terms: 12 | test 0.019934
+Epoch 2150 | recon 0.017056 | sindy 0.090716 (w=0.2466) | active terms: 12 | test 0.019352
+Epoch 2200 | recon 0.020499 | sindy 0.092946 (w=0.2729) | active terms: 12 | test 0.020848
+Epoch 2250 | recon 0.016402 | sindy 0.083482 (w=0.3019) | active terms: 12 | test 0.019249
+Epoch 2300 | recon 0.018492 | sindy 0.074785 (w=0.3340) | active terms: 12 | test 0.020939
+Epoch 2350 | recon 0.015529 | sindy 0.068125 (w=0.3695) | active terms: 12 | test 0.020382
+Epoch 2400 | recon 0.016992 | sindy 0.068511 (w=0.4088) | active terms: 12 | test 0.019032
+Epoch 2450 | recon 0.019224 | sindy 0.073773 (w=0.4521) | active terms: 12 | test 0.018561
+--- Epoch 2500: E_sindy ramp complete (weight=0.5000) ---
+Epoch 2500 | recon 0.015170 | sindy 0.077574 (w=0.5000) | active terms: 12 | test 0.020128
+Epoch 2550 | recon 0.015948 | sindy 0.075714 (w=0.5000) | active terms: 12 | test 0.018479
+Epoch 2600 | recon 0.014375 | sindy 0.067589 (w=0.5000) | active terms: 12 | test 0.018050
+Epoch 2650 | recon 0.015287 | sindy 0.058542 (w=0.5000) | active terms: 12 | test 0.019068
+Epoch 2700 | recon 0.017559 | sindy 0.053641 (w=0.5000) | active terms: 12 | test 0.018980
+Epoch 2750 | recon 0.014319 | sindy 0.063993 (w=0.5000) | active terms: 12 | test 0.017817
+Epoch 2800 | recon 0.014403 | sindy 0.062386 (w=0.5000) | active terms: 12 | test 0.018459
+Epoch 2850 | recon 0.014632 | sindy 0.062407 (w=0.5000) | active terms: 12 | test 0.017044
+Epoch 2900 | recon 0.014579 | sindy 0.052911 (w=0.5000) | active terms: 12 | test 0.017788
+Epoch 2950 | recon 0.014758 | sindy 0.047133 (w=0.5000) | active terms: 12 | test 0.016703
+Epoch 3000 | recon 0.013490 | sindy 0.043800 (w=0.5000) | active terms: 12 | test 0.016584
+Epoch 3050 | recon 0.013490 | sindy 0.040584 (w=0.5000) | active terms: 12 | test 0.016966
+Epoch 3100 | recon 0.013891 | sindy 0.046672 (w=0.5000) | active terms: 12 | test 0.017646
+Epoch 3150 | recon 0.013398 | sindy 0.041348 (w=0.5000) | active terms: 12 | test 0.016137
+Epoch 3200 | recon 0.012607 | sindy 0.037180 (w=0.5000) | active terms: 12 | test 0.016037
+Epoch 3250 | recon 0.012307 | sindy 0.033923 (w=0.5000) | active terms: 12 | test 0.015842
+Epoch 3300 | recon 0.013925 | sindy 0.039192 (w=0.5000) | active terms: 12 | test 0.016603
+Epoch 3350 | recon 0.012920 | sindy 0.033934 (w=0.5000) | active terms: 12 | test 0.015932
+Epoch 3400 | recon 0.012976 | sindy 0.029087 (w=0.5000) | active terms: 12 | test 0.015768
+Epoch 3450 | recon 0.013171 | sindy 0.033220 (w=0.5000) | active terms: 12 | test 0.015519
+Epoch 3500 | recon 0.011851 | sindy 0.034737 (w=0.5000) | active terms: 12 | test 0.015681
+Epoch 3550 | recon 0.013181 | sindy 0.028073 (w=0.5000) | active terms: 12 | test 0.016086
+Epoch 3600 | recon 0.012597 | sindy 0.027143 (w=0.5000) | active terms: 12 | test 0.015108
+Epoch 3650 | recon 0.012280 | sindy 0.027726 (w=0.5000) | active terms: 12 | test 0.015458
+Epoch 3700 | recon 0.011952 | sindy 0.030128 (w=0.5000) | active terms: 12 | test 0.016066
+Epoch 3750 | recon 0.011812 | sindy 0.029651 (w=0.5000) | active terms: 12 | test 0.014824
+Epoch 3800 | recon 0.012935 | sindy 0.025805 (w=0.5000) | active terms: 12 | test 0.015561
+Epoch 3850 | recon 0.013499 | sindy 0.025607 (w=0.5000) | active terms: 12 | test 0.014794
+Epoch 3900 | recon 0.011434 | sindy 0.024065 (w=0.5000) | active terms: 12 | test 0.014694
+Epoch 3950 | recon 0.011727 | sindy 0.026844 (w=0.5000) | active terms: 12 | test 0.015258
+Epoch 4000 | recon 0.011937 | sindy 0.027538 (w=0.5000) | active terms: 12 | test 0.014965
+Epoch 4050 | recon 0.013815 | sindy 0.024483 (w=0.5000) | active terms: 12 | test 0.014687
+Epoch 4100 | recon 0.011569 | sindy 0.024696 (w=0.5000) | active terms: 12 | test 0.014598
+Epoch 4150 | recon 0.011259 | sindy 0.023751 (w=0.5000) | active terms: 12 | test 0.015138
+Epoch 4200 | recon 0.011392 | sindy 0.024273 (w=0.5000) | active terms: 12 | test 0.014373
+Epoch 4250 | recon 0.012122 | sindy 0.024483 (w=0.5000) | active terms: 12 | test 0.015516
+Epoch 4300 | recon 0.011493 | sindy 0.025420 (w=0.5000) | active terms: 12 | test 0.014820
+Epoch 4350 | recon 0.012134 | sindy 0.031337 (w=0.5000) | active terms: 12 | test 0.016370
+Epoch 4400 | recon 0.011991 | sindy 0.024466 (w=0.5000) | active terms: 12 | test 0.014156
+Epoch 4450 | recon 0.011064 | sindy 0.027442 (w=0.5000) | active terms: 12 | test 0.014032
+Epoch 4500 | recon 0.010881 | sindy 0.022518 (w=0.5000) | active terms: 12 | test 0.014469
+Epoch 4550 | recon 0.010973 | sindy 0.021763 (w=0.5000) | active terms: 12 | test 0.014007
+Epoch 4600 | recon 0.011107 | sindy 0.025078 (w=0.5000) | active terms: 12 | test 0.016952
+Epoch 4650 | recon 0.011059 | sindy 0.022593 (w=0.5000) | active terms: 12 | test 0.014533
+Epoch 4700 | recon 0.011172 | sindy 0.025360 (w=0.5000) | active terms: 12 | test 0.014303
+Epoch 4750 | recon 0.010700 | sindy 0.021234 (w=0.5000) | active terms: 12 | test 0.014168
+Epoch 4800 | recon 0.011282 | sindy 0.022122 (w=0.5000) | active terms: 12 | test 0.014547
+Epoch 4850 | recon 0.011044 | sindy 0.028256 (w=0.5000) | active terms: 12 | test 0.014008
+Epoch 4900 | recon 0.010636 | sindy 0.025098 (w=0.5000) | active terms: 12 | test 0.014638
+Epoch 4950 | recon 0.010595 | sindy 0.026166 (w=0.5000) | active terms: 12 | test 0.014310
+Epoch 4999 | recon 0.010561 | sindy 0.023651 (w=0.5000) | active terms: 12 | test 0.013996
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 0.003143 | active terms: 12
+Epoch   50 | deriv 0.003244 | active terms: 12
+Epoch  100 | deriv 0.003038 | active terms: 12
+Epoch  150 | deriv 0.003027 | active terms: 12
+Epoch  200 | deriv 0.003015 | active terms: 12
+Epoch  250 | deriv 0.003002 | active terms: 12
+Epoch  300 | deriv 0.002988 | active terms: 12
+Epoch  350 | deriv 0.002972 | active terms: 12
+Epoch  400 | deriv 0.002955 | active terms: 12
+Epoch  450 | deriv 0.002937 | active terms: 12
+Epoch  500 | deriv 0.002919 | active terms: 12
+Epoch  550 | deriv 0.002899 | active terms: 12
+Epoch  600 | deriv 0.002878 | active terms: 12
+Epoch  650 | deriv 0.002857 | active terms: 12
+Epoch  700 | deriv 0.002835 | active terms: 12
+Epoch  750 | deriv 0.002812 | active terms: 12
+Epoch  800 | deriv 0.002789 | active terms: 12
+Epoch  850 | deriv 0.002765 | active terms: 12
+Epoch  900 | deriv 0.002741 | active terms: 12
+Epoch  950 | deriv 0.002716 | active terms: 12
+Epoch 1000 | deriv 0.002690 | active terms: 12
+Epoch 1050 | deriv 0.002664 | active terms: 12
+Epoch 1100 | deriv 0.002638 | active terms: 12
+Epoch 1150 | deriv 0.002611 | active terms: 12
+Epoch 1200 | deriv 0.002584 | active terms: 12
+Epoch 1250 | deriv 0.002557 | active terms: 12
+Epoch 1300 | deriv 0.002530 | active terms: 12
+Epoch 1350 | deriv 0.002502 | active terms: 12
+Epoch 1400 | deriv 0.002475 | active terms: 12
+Epoch 1450 | deriv 0.002447 | active terms: 12
+Epoch 1500 | deriv 0.002419 | active terms: 12
+Epoch 1550 | deriv 0.002392 | active terms: 12
+Epoch 1600 | deriv 0.002364 | active terms: 12
+Epoch 1650 | deriv 0.002336 | active terms: 12
+Epoch 1700 | deriv 0.002309 | active terms: 12
+Epoch 1750 | deriv 0.002282 | active terms: 12
+Epoch 1800 | deriv 0.002255 | active terms: 12
+Epoch 1850 | deriv 0.002228 | active terms: 12
+Epoch 1900 | deriv 0.002201 | active terms: 12
+Epoch 1950 | deriv 0.002703 | active terms: 12
+Epoch 2000 | deriv 0.002712 | active terms: 12
+Epoch 2050 | deriv 0.002130 | active terms: 12
+Epoch 2100 | deriv 0.002107 | active terms: 12
+Epoch 2150 | deriv 0.002148 | active terms: 12
+Epoch 2200 | deriv 0.002289 | active terms: 12
+Epoch 2250 | deriv 0.002187 | active terms: 12
+Epoch 2300 | deriv 0.002039 | active terms: 12
+Epoch 2350 | deriv 0.002008 | active terms: 12
+Epoch 2400 | deriv 0.002061 | active terms: 12
+Epoch 2450 | deriv 0.002272 | active terms: 12
+Epoch 2500 | deriv 0.002080 | active terms: 12
+Epoch 2550 | deriv 0.001964 | active terms: 12
+Epoch 2600 | deriv 0.001949 | active terms: 12
+Epoch 2650 | deriv 0.002101 | active terms: 12
+Epoch 2700 | deriv 0.002130 | active terms: 12
+Epoch 2750 | deriv 0.002000 | active terms: 12
+Epoch 2800 | deriv 0.001880 | active terms: 12
+Epoch 2850 | deriv 0.001938 | active terms: 12
+Epoch 2900 | deriv 0.002052 | active terms: 12
+Epoch 2950 | deriv 0.001901 | active terms: 12
+Epoch 2999 | deriv 0.002045 | active terms: 12
+
+Refit phase: 600 epochs, lr=2.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.002032
+Refit   50 | deriv 0.001834
+Refit  100 | deriv 0.001823
+Refit  150 | deriv 0.001822
+Refit  200 | deriv 0.001819
+Refit  250 | deriv 0.001817
+Refit  300 | deriv 0.001814
+Refit  350 | deriv 0.001811
+Refit  400 | deriv 0.001808
+Refit  450 | deriv 0.001805
+Refit  500 | deriv 0.001801
+Refit  550 | deriv 0.001797
+Refit  599 | deriv 0.001794
+
+============================================================
+RESULT [sw05_dlr01]
+  Recon: 4.49%  |  Forecast: 3984.16%
+  Active terms: 12  |  Time: 132s
+  dz1/dt = 11.002 + 9.520*z1 + 4.131*z2 + 25.490*z3
+  dz2/dt = 6.396 + 16.425*z1 - 7.072*z2 + 16.340*z3
+  dz3/dt = 0.653 - 28.448*z1 + 25.718*z2 - 2.306*z3
+============================================================
+
+
+######################################################################
+[8/8] sw2_dlr01: sw=2.0, dlr=0.1, warm=2500, ep=5000, refit=3000, l1=0
+######################################################################
+
+Epoch    0 | recon 0.212974 | active terms: 12 | test 0.235183
+Epoch   50 | recon 0.020740 | sindy 10.658237 (w=0.0014) | active terms: 12 | test 0.022425
+Epoch  100 | recon 0.018210 | sindy 11.897027 (w=0.0030) | active terms: 12 | test 0.020252
+Epoch  150 | recon 0.015546 | sindy 7.540308 (w=0.0047) | active terms: 12 | test 0.018458
+Epoch  200 | recon 0.013126 | sindy 5.448214 (w=0.0067) | active terms: 12 | test 0.015553
+Epoch  250 | recon 0.011707 | sindy 5.223844 (w=0.0088) | active terms: 12 | test 0.014747
+Epoch  300 | recon 0.011204 | sindy 4.457535 (w=0.0112) | active terms: 12 | test 0.014562
+Epoch  350 | recon 0.010617 | sindy 3.694266 (w=0.0138) | active terms: 12 | test 0.014470
+Epoch  400 | recon 0.011720 | sindy 3.249840 (w=0.0166) | active terms: 12 | test 0.013826
+Epoch  450 | recon 0.009615 | sindy 3.159420 (w=0.0198) | active terms: 12 | test 0.014238
+Epoch  500 | recon 0.009952 | sindy 3.530504 (w=0.0233) | active terms: 12 | test 0.014111
+Epoch  550 | recon 0.010504 | sindy 4.017844 (w=0.0272) | active terms: 12 | test 0.013847
+Epoch  600 | recon 0.009958 | sindy 3.742280 (w=0.0315) | active terms: 12 | test 0.015046
+Epoch  650 | recon 0.011362 | sindy 3.679654 (w=0.0362) | active terms: 12 | test 0.017945
+Epoch  700 | recon 0.045484 | sindy 8.662960 (w=0.0415) | active terms: 12 | test 0.053177
+Epoch  750 | recon 0.030223 | sindy 9.664867 (w=0.0472) | active terms: 12 | test 0.034590
+Epoch  800 | recon 0.031071 | sindy 7.194142 (w=0.0536) | active terms: 12 | test 0.035507
+Epoch  850 | recon 0.028848 | sindy 6.997706 (w=0.0607) | active terms: 12 | test 0.036948
+Epoch  900 | recon 0.026510 | sindy 8.692878 (w=0.0685) | active terms: 12 | test 0.031228
+Epoch  950 | recon 0.036382 | sindy 3.031488 (w=0.0771) | active terms: 12 | test 0.036956
+Epoch 1000 | recon 0.031598 | sindy 7.109483 (w=0.0867) | active terms: 12 | test 0.033995
+Epoch 1050 | recon 0.028508 | sindy 5.870376 (w=0.0972) | active terms: 12 | test 0.029757
+Epoch 1100 | recon 0.023623 | sindy 0.539833 (w=0.1089) | active terms: 12 | test 0.027749
+Epoch 1150 | recon 0.023402 | sindy 0.325832 (w=0.1218) | active terms: 12 | test 0.025622
+Epoch 1200 | recon 0.025135 | sindy 0.244540 (w=0.1360) | active terms: 12 | test 0.024207
+Epoch 1250 | recon 0.026588 | sindy 0.207591 (w=0.1517) | active terms: 12 | test 0.024534
+Epoch 1300 | recon 0.034424 | sindy 0.180535 (w=0.1691) | active terms: 12 | test 0.031956
+Epoch 1350 | recon 0.024266 | sindy 0.174694 (w=0.1883) | active terms: 12 | test 0.024336
+Epoch 1400 | recon 0.023041 | sindy 0.132804 (w=0.2095) | active terms: 12 | test 0.023200
+Epoch 1450 | recon 0.028176 | sindy 0.143848 (w=0.2330) | active terms: 12 | test 0.027381
+Epoch 1500 | recon 0.024398 | sindy 0.114566 (w=0.2589) | active terms: 12 | test 0.023925
+Epoch 1550 | recon 0.021429 | sindy 0.120278 (w=0.2876) | active terms: 12 | test 0.026496
+Epoch 1600 | recon 0.028548 | sindy 0.105472 (w=0.3193) | active terms: 12 | test 0.027783
+Epoch 1650 | recon 0.018928 | sindy 0.097897 (w=0.3543) | active terms: 12 | test 0.026811
+Epoch 1700 | recon 0.020217 | sindy 0.090176 (w=0.3930) | active terms: 12 | test 0.029000
+Epoch 1750 | recon 0.038928 | sindy 0.079563 (w=0.4357) | active terms: 12 | test 0.023368
+Epoch 1800 | recon 0.021174 | sindy 0.083653 (w=0.4830) | active terms: 12 | test 0.023901
+Epoch 1850 | recon 0.020244 | sindy 0.077109 (w=0.5352) | active terms: 12 | test 0.024141
+Epoch 1900 | recon 0.021996 | sindy 0.062989 (w=0.5929) | active terms: 12 | test 0.023955
+Epoch 1950 | recon 0.018048 | sindy 0.051608 (w=0.6567) | active terms: 12 | test 0.023931
+Epoch 2000 | recon 0.019922 | sindy 0.055079 (w=0.7272) | active terms: 12 | test 0.029910
+Epoch 2050 | recon 0.031431 | sindy 0.048155 (w=0.8051) | active terms: 12 | test 0.040727
+Epoch 2100 | recon 0.019713 | sindy 0.053449 (w=0.8912) | active terms: 12 | test 0.035873
+Epoch 2150 | recon 0.022365 | sindy 0.053877 (w=0.9863) | active terms: 12 | test 0.026630
+Epoch 2200 | recon 0.021832 | sindy 0.048742 (w=1.0915) | active terms: 12 | test 0.024132
+Epoch 2250 | recon 0.022135 | sindy 0.044950 (w=1.2077) | active terms: 12 | test 0.025258
+Epoch 2300 | recon 0.021822 | sindy 0.044871 (w=1.3362) | active terms: 12 | test 0.023518
+Epoch 2350 | recon 0.026175 | sindy 0.036044 (w=1.4781) | active terms: 12 | test 0.034111
+Epoch 2400 | recon 0.022338 | sindy 0.036455 (w=1.6350) | active terms: 12 | test 0.024993
+Epoch 2450 | recon 0.021327 | sindy 0.041976 (w=1.8084) | active terms: 12 | test 0.034570
+--- Epoch 2500: E_sindy ramp complete (weight=2.0000) ---
+Epoch 2500 | recon 0.020606 | sindy 0.042098 (w=2.0000) | active terms: 12 | test 0.030681
+Epoch 2550 | recon 0.025469 | sindy 0.045416 (w=2.0000) | active terms: 12 | test 0.023910
+Epoch 2600 | recon 0.021865 | sindy 0.042621 (w=2.0000) | active terms: 12 | test 0.023973
+Epoch 2650 | recon 0.028447 | sindy 0.041455 (w=2.0000) | active terms: 12 | test 0.025258
+Epoch 2700 | recon 0.022922 | sindy 0.047877 (w=2.0000) | active terms: 12 | test 0.024657
+Epoch 2750 | recon 0.053428 | sindy 1.322702 (w=2.0000) | active terms: 12 | test 0.064752
+Epoch 2800 | recon 0.029118 | sindy 6.059907 (w=2.0000) | active terms: 12 | test 0.032371
+Epoch 2850 | recon 0.030976 | sindy 6.765669 (w=2.0000) | active terms: 12 | test 0.030085
+Epoch 2900 | recon 0.030909 | sindy 8.124748 (w=2.0000) | active terms: 12 | test 0.029965
+Epoch 2950 | recon 0.028125 | sindy 7.019011 (w=2.0000) | active terms: 12 | test 0.029109
+Epoch 3000 | recon 0.028375 | sindy 6.806623 (w=2.0000) | active terms: 12 | test 0.030191
+Epoch 3050 | recon 0.025380 | sindy 6.766166 (w=2.0000) | active terms: 12 | test 0.030345
+Epoch 3100 | recon 0.028352 | sindy 5.998377 (w=2.0000) | active terms: 12 | test 0.031108
+Epoch 3150 | recon 0.028752 | sindy 6.179790 (w=2.0000) | active terms: 12 | test 0.027663
+Epoch 3200 | recon 0.025449 | sindy 6.127940 (w=2.0000) | active terms: 12 | test 0.028746
+Epoch 3250 | recon 0.023109 | sindy 5.447042 (w=2.0000) | active terms: 12 | test 0.030660
+Epoch 3300 | recon 0.028011 | sindy 5.878878 (w=2.0000) | active terms: 12 | test 0.036039
+Epoch 3350 | recon 0.021025 | sindy 4.449549 (w=2.0000) | active terms: 12 | test 0.030046
+Epoch 3400 | recon 0.019998 | sindy 5.476508 (w=2.0000) | active terms: 12 | test 0.027655
+Epoch 3450 | recon 0.022701 | sindy 4.471428 (w=2.0000) | active terms: 12 | test 0.034993
+Epoch 3500 | recon 0.020340 | sindy 4.699562 (w=2.0000) | active terms: 12 | test 0.035166
+Epoch 3550 | recon 0.024768 | sindy 3.793658 (w=2.0000) | active terms: 12 | test 0.033196
+Epoch 3600 | recon 0.021132 | sindy 3.992985 (w=2.0000) | active terms: 12 | test 0.029662
+Epoch 3650 | recon 0.019564 | sindy 4.110343 (w=2.0000) | active terms: 12 | test 0.028554
+Epoch 3700 | recon 0.019782 | sindy 4.028666 (w=2.0000) | active terms: 12 | test 0.028156
+Epoch 3750 | recon 0.025646 | sindy 4.132056 (w=2.0000) | active terms: 12 | test 0.025791
+Epoch 3800 | recon 0.016987 | sindy 4.173528 (w=2.0000) | active terms: 12 | test 0.029732
+Epoch 3850 | recon 0.022220 | sindy 3.626923 (w=2.0000) | active terms: 12 | test 0.028440
+Epoch 3900 | recon 0.018289 | sindy 4.088976 (w=2.0000) | active terms: 12 | test 0.023523
+Epoch 3950 | recon 0.017798 | sindy 3.878544 (w=2.0000) | active terms: 12 | test 0.026281
+Epoch 4000 | recon 0.022284 | sindy 4.164097 (w=2.0000) | active terms: 12 | test 0.026929
+Epoch 4050 | recon 0.023634 | sindy 3.541787 (w=2.0000) | active terms: 12 | test 0.026618
+Epoch 4100 | recon 0.022261 | sindy 3.321433 (w=2.0000) | active terms: 12 | test 0.027331
+Epoch 4150 | recon 0.022909 | sindy 3.088331 (w=2.0000) | active terms: 12 | test 0.023931
+Epoch 4200 | recon 0.018588 | sindy 2.926150 (w=2.0000) | active terms: 12 | test 0.022363
+Epoch 4250 | recon 0.016458 | sindy 2.251433 (w=2.0000) | active terms: 12 | test 0.022218
+Epoch 4300 | recon 0.020084 | sindy 2.094168 (w=2.0000) | active terms: 12 | test 0.021274
+Epoch 4350 | recon 0.022233 | sindy 1.818556 (w=2.0000) | active terms: 12 | test 0.022371
+Epoch 4400 | recon 0.017655 | sindy 1.765888 (w=2.0000) | active terms: 12 | test 0.021806
+Epoch 4450 | recon 0.014941 | sindy 1.523751 (w=2.0000) | active terms: 12 | test 0.019542
+Epoch 4500 | recon 0.022079 | sindy 1.237500 (w=2.0000) | active terms: 12 | test 0.020364
+Epoch 4550 | recon 0.018845 | sindy 1.080473 (w=2.0000) | active terms: 12 | test 0.019297
+Epoch 4600 | recon 0.015999 | sindy 1.066653 (w=2.0000) | active terms: 12 | test 0.018026
+Epoch 4650 | recon 0.016692 | sindy 0.902647 (w=2.0000) | active terms: 12 | test 0.017747
+Epoch 4700 | recon 0.018627 | sindy 0.738934 (w=2.0000) | active terms: 12 | test 0.016701
+Epoch 4750 | recon 0.016940 | sindy 0.712931 (w=2.0000) | active terms: 12 | test 0.018055
+Epoch 4800 | recon 0.018523 | sindy 0.814270 (w=2.0000) | active terms: 12 | test 0.019936
+Epoch 4850 | recon 0.019493 | sindy 0.982619 (w=2.0000) | active terms: 12 | test 0.022120
+Epoch 4900 | recon 0.015297 | sindy 0.735117 (w=2.0000) | active terms: 12 | test 0.020598
+Epoch 4950 | recon 0.018216 | sindy 0.822969 (w=2.0000) | active terms: 12 | test 0.019424
+Epoch 4999 | recon 0.015211 | sindy 0.759479 (w=2.0000) | active terms: 12 | test 0.018629
+
+Refit phase: freezing encoder, extracting latent trajectories...
+  Pre-refit active terms: 12
+  Latent trajectory: 1001 points, calling fit() for 3000 epochs
+Epoch    0 | deriv 0.284830 | active terms: 12
+Epoch   50 | deriv 0.279304 | active terms: 12
+Epoch  100 | deriv 0.275969 | active terms: 12
+Epoch  150 | deriv 0.273900 | active terms: 12
+Epoch  200 | deriv 0.272537 | active terms: 12
+Epoch  250 | deriv 0.271686 | active terms: 12
+Epoch  300 | deriv 0.271183 | active terms: 12
+Epoch  350 | deriv 0.270896 | active terms: 12
+Epoch  400 | deriv 0.270735 | active terms: 12
+Epoch  450 | deriv 0.270644 | active terms: 12
+Epoch  500 | deriv 0.270592 | active terms: 12
+Epoch  550 | deriv 0.270562 | active terms: 12
+Epoch  600 | deriv 0.270544 | active terms: 12
+Epoch  650 | deriv 0.270534 | active terms: 12
+Epoch  700 | deriv 0.270528 | active terms: 12
+Epoch  750 | deriv 0.270525 | active terms: 12
+Epoch  800 | deriv 0.270857 | active terms: 12
+Epoch  850 | deriv 0.270524 | active terms: 12
+Epoch  900 | deriv 0.270523 | active terms: 12
+Epoch  950 | deriv 0.270522 | active terms: 12
+Epoch 1000 | deriv 0.270558 | active terms: 12
+Epoch 1050 | deriv 0.270605 | active terms: 12
+Epoch 1100 | deriv 0.270522 | active terms: 12
+Epoch 1150 | deriv 0.270522 | active terms: 12
+Epoch 1200 | deriv 0.270552 | active terms: 12
+Epoch 1250 | deriv 0.270569 | active terms: 12
+Epoch 1300 | deriv 0.270536 | active terms: 12
+Epoch 1350 | deriv 0.270524 | active terms: 12
+Epoch 1400 | deriv 0.270572 | active terms: 12
+Epoch 1450 | deriv 0.270557 | active terms: 12
+Epoch 1500 | deriv 0.270524 | active terms: 12
+Epoch 1550 | deriv 0.270525 | active terms: 12
+Epoch 1600 | deriv 0.270529 | active terms: 12
+Epoch 1650 | deriv 0.270541 | active terms: 12
+Epoch 1700 | deriv 0.270523 | active terms: 12
+Epoch 1750 | deriv 0.270558 | active terms: 12
+Epoch 1800 | deriv 0.270522 | active terms: 12
+Epoch 1850 | deriv 0.270536 | active terms: 12
+Epoch 1900 | deriv 0.270527 | active terms: 12
+Epoch 1950 | deriv 0.270587 | active terms: 12
+Epoch 2000 | deriv 0.270545 | active terms: 12
+Epoch 2050 | deriv 0.270556 | active terms: 12
+Epoch 2100 | deriv 0.270532 | active terms: 12
+Epoch 2150 | deriv 0.270534 | active terms: 12
+Epoch 2200 | deriv 0.270603 | active terms: 12
+Epoch 2250 | deriv 0.270550 | active terms: 12
+Epoch 2300 | deriv 0.270624 | active terms: 12
+Epoch 2350 | deriv 0.270563 | active terms: 12
+Epoch 2400 | deriv 0.271378 | active terms: 12
+Epoch 2450 | deriv 0.270566 | active terms: 12
+Epoch 2500 | deriv 0.270606 | active terms: 12
+Epoch 2550 | deriv 0.270556 | active terms: 12
+Epoch 2600 | deriv 0.270536 | active terms: 12
+Epoch 2650 | deriv 0.270612 | active terms: 12
+Epoch 2700 | deriv 0.270701 | active terms: 12
+Epoch 2750 | deriv 0.270605 | active terms: 12
+Epoch 2800 | deriv 0.270595 | active terms: 12
+Epoch 2850 | deriv 0.270536 | active terms: 12
+Epoch 2900 | deriv 0.270593 | active terms: 12
+Epoch 2950 | deriv 0.270558 | active terms: 12
+Epoch 2999 | deriv 0.270540 | active terms: 12
+
+Refit phase: 600 epochs, lr=2.0e-02, l2=0, mask frozen (12 active terms)
+Refit    0 | deriv 0.270530
+Refit   50 | deriv 0.270528
+Refit  100 | deriv 0.270522
+Refit  150 | deriv 0.270522
+Refit  200 | deriv 0.270522
+Refit  250 | deriv 0.270522
+Refit  300 | deriv 0.270522
+Refit  350 | deriv 0.270522
+Refit  400 | deriv 0.270522
+Refit  450 | deriv 0.270522
+Refit  500 | deriv 0.270522
+Refit  550 | deriv 0.270522
+Refit  599 | deriv 0.270522
+
+============================================================
+RESULT [sw2_dlr01]
+  Recon: 5.51%  |  Forecast: DIVERGED
+  Active terms: 12  |  Time: 122s
+  dz1/dt = 10.122 + 21.199*z1 - 42.121*z2 + 18.812*z3
+  dz2/dt = 1.646 + 8.528*z1 - 6.501*z2 + 11.140*z3
+  dz3/dt = 6.399 - 3.386*z1 - 27.730*z2 - 14.749*z3
+============================================================
+
+
+======================================================================
+PHASE 2 RESULTS
+======================================================================
+Tag                    recon%    fore%  terms   time
+-------------------------------------------------------
+sw1_dlr01_10k           4.00%    19.6%     12   228s
+sw05_dlr01              4.49%  3984.2%     12   132s
+sw1_l1e-4               5.25%     DIV     12   125s
+sw2_dlr01               5.51%     DIV     12   122s
+sw1_10k                 5.66%  1713.3%     12   228s
+sw1_dlr01_w1k           7.00%     DIV     12   114s
+sw1_dlr01              10.92%     DIV     12   109s
+sw1_w1k_r5k            11.04%     DIV     12   133s
+
+Ref: baseline=4.53%/13.80%, SINDy-SHRED=2.01%
+Results in sst_hpo_phase2_results.json
+

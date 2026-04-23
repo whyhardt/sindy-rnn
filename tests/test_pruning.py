@@ -96,7 +96,7 @@ def test_pruning_fires_at_patience_2():
     assert model.coefficient_masks.all()
 
     # First pruning step - patience goes to 1
-    # delta is in ODE units, converted to discrete: delta_disc = 0.01 * dt / alpha
+    # delta is in ODE units, used directly (no conversion needed)
     with torch.no_grad():
         ensemble_prune(model, alpha=0.05, delta=0.01)
 
@@ -107,8 +107,8 @@ def test_pruning_fires_at_patience_2():
     with torch.no_grad():
         ensemble_prune(model, alpha=0.05, delta=0.01)
 
-    # Zeroed weights give theta_P=0 everywhere.
-    # delta_discrete = 0.01 * dt / alpha > 0, so all terms fail.
+    # Zeroed weights give theta=0 everywhere.
+    # |0| > 0.01 is false, so all terms fail.
     # ALL terms should be pruned.
     assert not model.coefficient_masks.any()
 
@@ -143,7 +143,7 @@ def test_pruning_fires_at_patience_2_decomposed():
     with torch.no_grad():
         ensemble_prune(model, alpha=0.05, delta=0.01)
 
-    # Zeroed weights give theta_P=0 everywhere.
+    # Zeroed weights give theta=0 everywhere.
     # ALL terms should be pruned.
     assert not model.coefficient_masks.any()
 
@@ -167,13 +167,13 @@ def test_threshold_pruning_single_ensemble():
             b.fill_(0.001)
 
     # Two rounds of threshold patience update + prune
-    # threshold=0.5 in ODE units, converted to discrete: 0.5 * dt / alpha
+    # threshold=0.5 in ODE units, used directly
     with torch.no_grad():
         threshold_patience_update(model, threshold=0.5)
         threshold_patience_update(model, threshold=0.5)
         threshold_prune(model, patience_limit=2)
 
-    # Tiny weights give tiny theta_P.
+    # Tiny weights give tiny theta.
     # All terms should be pruned.
     assert not model.coefficient_masks.any()
 
@@ -189,9 +189,8 @@ def test_pruning_preserves_significant_terms():
     )
 
     # Set a large linear coefficient that should survive
-    # theta_P for self-term will be 5.0
-    # delta=0.5 in ODE units -> delta_disc = 0.5 * dt / alpha = 0.5 * 1.0 / 1.0 = 0.5
-    # |5.0| > 0.5, so it survives
+    # theta for self-term will be 5.0
+    # delta=0.5, |5.0| > 0.5, so it survives
     proj = model.rnn.projection
     with torch.no_grad():
         proj.constant_bias.fill_(0.0)

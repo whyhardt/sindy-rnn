@@ -71,16 +71,19 @@ SHRED_SINDY_REG = 10.0
 SHRED_THRES_EPOCH = 300     # appendix: thresholding every 300 epochs
 
 # sindy-rnn
-RNN_WINDOW = 30
 RNN_ENSEMBLE = 11
-RNN_EPOCHS = 1000
-RNN_WARMUP = 200
-RNN_LR = 1e-3
-RNN_L1 = 1e-4
-RNN_PRUNE_THRESHOLD = 0.1
-RNN_PRUNE_FREQ = 100#20
-RNN_REFIT = 100
-RNN_GRU_HIDDEN = None  # match SINDy-SHRED: GRU hidden_size = latent_dim
+RNN_EPOCHS = 10000
+RNN_PRUNING_WARMUP = 0
+RNN_SINDY_WARMUP = 0       # E_sindy + L1 start: let encoder/decoder converge first
+RNN_LR = 5e-4
+RNN_DYNAMICS_LR = 0.1      # higher lr for polynomial dynamics (ODE coefficients)
+RNN_L1 = 0.05
+RNN_PRUNE_THRESHOLD = 0.01
+RNN_PRUNE_FREQ = 100
+RNN_REFIT = 10000
+RNN_SINDY_WEIGHT = 10.0       # weight on E_sindy relative to E_id
+RNN_STABILITY_WEIGHT = 1      # discrete Euler stability penalty on Jacobian eigenvalues
+RNN_GRU_HIDDEN = None         # match SINDy-SHRED: GRU hidden_size = latent_dim
 
 # METHODS = ['sindy-shred', 'shred', 'sindy-rnn']
 METHODS = ['sindy-rnn']
@@ -102,30 +105,46 @@ def get_sensor_locs(full_dim, seed):
     return rng.choice(full_dim, size=NUM_SENSORS, replace=False)
 
 
-def prepare_sindy_rnn_data(X_scaled, sensor_locs, window_size, train_end):
+def prepare_sindy_rnn_data(X_scaled, sensor_locs, lags, train_end):
+    """Create sliding-window data for sindy-rnn (stride=1).
+
+    Each sample is a sensor window of length LAGS with one same-timestep
+    reconstruction target (the full state at the window's last frame).
+
+    Returns:
+        sparse_train: (N_train, LAGS, sparse_dim)
+        full_target_train: (N_train, full_dim)
+        sparse_test: (N_test, LAGS, sparse_dim) or None
+        full_target_test: (N_test, full_dim) or None
+    """
     N = len(X_scaled)
     sparse_all = X_scaled[:, sensor_locs]
 
-    usable_train = train_end - 1
-    n_train = usable_train // window_size
-    sparse_train = sparse_all[:n_train * window_size].reshape(n_train, window_size, -1)
-    full_next_train = X_scaled[1:n_train * window_size + 1].reshape(n_train, window_size, -1)
+    # Training: sliding windows with stride=1
+    N_train = train_end - lags + 1
+    train_starts = range(N_train)
+    sparse_train = np.stack([sparse_all[s:s + lags] for s in train_starts])
+    full_target_train = X_scaled[[s + lags - 1 for s in train_starts]]  # same-timestep
 
-    test_start = train_end
-    usable_test = N - test_start - 1
-    n_test = usable_test // window_size
-    if n_test > 0:
-        sparse_test = sparse_all[test_start:test_start + n_test * window_size].reshape(
-            n_test, window_size, -1)
-        full_next_test = X_scaled[test_start + 1:test_start + n_test * window_size + 1].reshape(
-            n_test, window_size, -1)
+    # Test: sliding windows from test region
+    N_test = N - train_end
+    if N_test >= lags:
+        test_starts = range(train_end - lags + 1, N - lags + 1)
+        sparse_test = np.stack([sparse_all[s:s + lags] for s in test_starts])
+        full_target_test = X_scaled[[s + lags - 1 for s in test_starts]]
+        N_test = len(test_starts)
     else:
-        sparse_test, full_next_test = None, None
+        sparse_test, full_target_test = None, None
+        N_test = 0
+
+    print(f"  Training windows: {N_train} (lags={lags}, stride=1)")
+    if N_test > 0:
+        print(f"  Test windows: {N_test}")
 
     def to_dev(x):
         return torch.tensor(x, dtype=torch.float32).to(DEVICE) if x is not None else None
-    return to_dev(sparse_train), to_dev(full_next_train), \
-           to_dev(sparse_test), to_dev(full_next_test)
+    return to_dev(sparse_train), to_dev(full_target_train), \
+           to_dev(sparse_test), to_dev(full_target_test)
 
 
 # ============================================================
@@ -300,7 +319,8 @@ def forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, scaler):
         latent_steps = []
         for t in range(n_forecast):
             h = model.dynamics.rnn.forward_polynomial(
-                h, None, mask=model.dynamics.coefficient_masks, theta=theta)
+                h, None, mask=model.dynamics.coefficient_masks, theta=theta,
+                integrator='rk4')
             latent_steps.append(h)
 
         # Decode in chunks to avoid OOM
@@ -315,6 +335,132 @@ def forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, scaler):
         forecast_arr[train_end:train_end + n_forecast] = scaler.inverse_transform(forecast_scaled)
 
     return forecast_arr
+
+
+# ============================================================
+# Latent trajectory extraction
+# ============================================================
+
+def extract_latent_sindy_rnn(model, X_scaled, sensor_locs, train_end):
+    """Extract encoder and autonomous rollout latent trajectories."""
+    N = X_scaled.shape[0]
+    E = model.ensemble_size
+    model.eval()
+
+    with torch.no_grad():
+        sparse_all = torch.tensor(
+            X_scaled[:, sensor_locs], dtype=torch.float32).to(DEVICE)
+        encoded = model.encoder(sparse_all.unsqueeze(0))  # (1, N, latent_dim)
+        z_encoder = encoded[0].cpu().numpy()  # (N, latent_dim)
+
+        # Autonomous rollout from train boundary
+        z_0 = encoded[:, train_end-1:train_end, :]  # (1, 1, latent_dim)
+        z_0 = z_0.expand(E, -1, -1)
+        theta = model.dynamics.rnn.unfold_polynomial_coefficients()
+        h = z_0
+        rollout = [h.mean(0)[0].cpu().numpy()]
+        n_forecast = N - train_end
+        for t in range(n_forecast):
+            h = model.dynamics.rnn.forward_polynomial(
+                h, None, mask=model.dynamics.coefficient_masks, theta=theta,
+                integrator='rk4')
+            rollout.append(h.mean(0)[0].cpu().numpy())
+        z_rollout = np.array(rollout)  # (n_forecast+1, latent_dim)
+
+    return {
+        'z_encoder': z_encoder,
+        'z_rollout': z_rollout,
+        'rollout_start_frame': train_end - 1,
+    }
+
+
+def extract_latent_sindy_shred(shred_obj, has_sindy=True):
+    """Extract encoder and SINDy-integrated latent trajectories."""
+    lags = shred_obj._lags
+    n_frames = shred_obj._n_time_dim
+    latent_dim = shred_obj._latent_dim
+
+    z_encoder = np.full((n_frames, latent_dim), np.nan)
+    for data_type, indices in [('train', shred_obj._train_ind),
+                                ('validate', shred_obj._val_ind),
+                                ('test', shred_obj._test_ind)]:
+        if indices is None or len(indices) == 0:
+            continue
+        z = shred_obj.gru_normalize(data_type=data_type).detach().cpu().numpy()
+        # gru_normalize uses gru_outputs(sindy=True) which creates consecutive
+        # pairs (h_out[:-1], h_out[1:]) and returns the targets h_out[1:],
+        # so z has len(indices)-1 rows: z[i] corresponds to indices[i+1].
+        for i in range(len(z)):
+            idx = indices[i + 1]
+            frame = idx + lags - 1
+            if frame < n_frames:
+                z_encoder[frame] = z[i]
+
+    z_rollout = None
+    rollout_start_frame = None
+    if has_sindy and shred_obj._model is not None:
+        try:
+            rollout_start_frame = shred_obj._train_ind[-1] + lags - 1
+            n_rollout = n_frames - rollout_start_frame
+            t = np.arange(n_rollout) * shred_obj._dt
+            z_rollout = shred_obj.sindy_predict(t=t, init_from='train')
+            if np.any(np.abs(z_rollout) > 1e6) or np.any(np.isnan(z_rollout)):
+                print("  SINDy latent rollout diverged")
+                z_rollout = None
+                rollout_start_frame = None
+        except Exception as e:
+            print(f"  SINDy latent rollout failed: {e}")
+
+    return {
+        'z_encoder': z_encoder,
+        'z_rollout': z_rollout,
+        'rollout_start_frame': rollout_start_frame,
+    }
+
+
+def plot_latent_dynamics(latent_dict, train_end, latent_dim, seed, save_dir, prefix):
+    """Plot latent variable dynamics for each method.
+
+    Creates one figure per method with one subplot per latent dimension,
+    showing encoder trajectory (blue) and autonomous rollout (red dashed).
+    """
+    for method, data in latent_dict.items():
+        fig, axes = plt.subplots(latent_dim, 1, figsize=(12, 3 * latent_dim),
+                                  sharex=True)
+        if latent_dim == 1:
+            axes = [axes]
+
+        z_enc = data['z_encoder']
+        z_roll = data.get('z_rollout')
+        roll_start = data.get('rollout_start_frame')
+
+        for d in range(latent_dim):
+            ax = axes[d]
+
+            valid = ~np.isnan(z_enc[:, d])
+            frames = np.arange(len(z_enc))
+            ax.plot(frames[valid], z_enc[valid, d], 'b-', alpha=0.7,
+                    linewidth=1, label='Encoder')
+
+            if z_roll is not None and roll_start is not None:
+                roll_frames = np.arange(roll_start, roll_start + len(z_roll))
+                ax.plot(roll_frames, z_roll[:, d], 'r--', alpha=0.7,
+                        linewidth=1.5, label='Autonomous rollout')
+
+            ax.axvline(x=train_end, color='k', linestyle=':', alpha=0.5,
+                       label='Train/Test' if d == 0 else None)
+            ax.set_ylabel(f'z{d+1}')
+            if d == 0:
+                ax.legend(loc='upper right', fontsize=8)
+
+        axes[-1].set_xlabel('Frame')
+        fig.suptitle(f'{method} — Latent Dynamics ({prefix}, seed {seed})', fontsize=12)
+        fig.tight_layout()
+
+        path = os.path.join(save_dir, f'{prefix}_latent_{method}_seed{seed}.png')
+        fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved latent dynamics plot: {path}")
 
 
 # ============================================================
@@ -372,6 +518,9 @@ def run_sindy_shred(X, sensor_locs, train_length, validate_length,
     # Metric 2: Forecast (autonomous rollout)
     forecast = forecast_sindy_shred(shred, n_frames, full_dim, train_end)
 
+    # Extract latent trajectories
+    latent = extract_latent_sindy_shred(shred, has_sindy=(sindy_reg > 0))
+
     # Save model
     if save_dir is not None:
         method_tag = 'shred' if sindy_reg == 0.0 else 'sindy_shred'
@@ -387,7 +536,7 @@ def run_sindy_shred(X, sensor_locs, train_length, validate_length,
         'n_params': n_params,
         'n_active_terms': n_active,
         'equations': equations,
-    }
+    }, latent
 
 
 def run_sindy_rnn(X, X_scaled, sensor_locs, train_end, full_dim, seed, scaler=None,
@@ -395,8 +544,8 @@ def run_sindy_rnn(X, X_scaled, sensor_locs, train_end, full_dim, seed, scaler=No
     """Train sindy-rnn and return reconstruction + forecast."""
     torch.manual_seed(seed)
 
-    sparse_train, full_next_train, sparse_test, full_next_test = \
-        prepare_sindy_rnn_data(X_scaled, sensor_locs, RNN_WINDOW, train_end)
+    sparse_train, full_target_train, sparse_test, full_target_test = \
+        prepare_sindy_rnn_data(X_scaled, sensor_locs, LAGS, train_end)
 
     model = SparseAutoencoderRNN(
         sparse_dim=NUM_SENSORS, full_dim=full_dim, latent_dim=LATENT_DIM,
@@ -412,13 +561,18 @@ def run_sindy_rnn(X, X_scaled, sensor_locs, train_end, full_dim, seed, scaler=No
     ).to(DEVICE)
 
     fit_autoencoder(
-        model, sparse_train, full_next_train,
-        sparse_obs_test=sparse_test, full_state_next_test=full_next_test,
-        epochs=RNN_EPOCHS, warmup_steps=RNN_WARMUP, batch_size=1,
-        learning_rate=RNN_LR, l1=RNN_L1,
+        model, sparse_train, full_target_train,
+        sparse_obs_test=sparse_test, full_state_target_test=full_target_test,
+        epochs=RNN_EPOCHS, warmup_steps=RNN_PRUNING_WARMUP, batch_size=64,
+        learning_rate=RNN_LR, dynamics_learning_rate=RNN_DYNAMICS_LR,
+        l1=RNN_L1,
         pruning_threshold=RNN_PRUNE_THRESHOLD, pruning_method='median',
         pruning_frequency=RNN_PRUNE_FREQ, dt=DT,
-        refit_epochs=RNN_REFIT, verbose=True,
+        refit_epochs=RNN_REFIT,
+        sindy_weight=RNN_SINDY_WEIGHT,
+        sindy_warmup_epochs=RNN_SINDY_WARMUP,
+        stability_weight=RNN_STABILITY_WEIGHT,
+        centered_diff=True, verbose=True,
     )
 
     active = model.count_active_terms()
@@ -436,6 +590,9 @@ def run_sindy_rnn(X, X_scaled, sensor_locs, train_end, full_dim, seed, scaler=No
     # Metric 2: Forecast (autonomous rollout)
     forecast = forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, scaler)
 
+    # Extract latent trajectories
+    latent = extract_latent_sindy_rnn(model, X_scaled, sensor_locs, train_end)
+
     # Save model
     if save_dir is not None:
         path = os.path.join(save_dir, f'cylinder_sindy_rnn_seed{seed}.pt')
@@ -450,7 +607,7 @@ def run_sindy_rnn(X, X_scaled, sensor_locs, train_end, full_dim, seed, scaler=No
         'n_params': n_params,
         'n_active_terms': n_active,
         'equations': equations,
-    }
+    }, latent
 
 
 # ============================================================
@@ -638,6 +795,7 @@ def main():
         sensor_locs = get_sensor_locs(full_dim, seed)
         seed_recons = {}
         seed_forecasts = {}
+        seed_latent = {}
 
         for method in METHODS:
             tag = f"Seed {seed}, {method}"
@@ -648,21 +806,22 @@ def main():
             t0 = time.time()
             try:
                 if method == 'sindy-shred':
-                    recons, forecast, info = run_sindy_shred(
+                    recons, forecast, info, latent = run_sindy_shred(
                         X, sensor_locs, train_length, validate_length, seed,
                         sindy_reg=SHRED_SINDY_REG, save_dir=save_dir)
                 elif method == 'shred':
-                    recons, forecast, info = run_sindy_shred(
+                    recons, forecast, info, latent = run_sindy_shred(
                         X, sensor_locs, train_length, validate_length, seed,
                         sindy_reg=0.0, save_dir=save_dir)
                 elif method == 'sindy-rnn':
-                    recons, forecast, info = run_sindy_rnn(
+                    recons, forecast, info, latent = run_sindy_rnn(
                         X, X_scaled, sensor_locs, train_end, full_dim, seed,
                         scaler=scaler, save_dir=save_dir)
 
                 elapsed = time.time() - t0
                 seed_recons[method] = recons
                 seed_forecasts[method] = forecast
+                seed_latent[method] = latent
 
                 # Metric 1: Reconstruction
                 recon_mse, recon_rel, n_recon = evaluate_reconstructions(
@@ -731,6 +890,11 @@ def main():
                     seed_fore_mse[m] = np.array(r[0]['forecast_mse_per_step'])
             if seed_fore_mse:
                 plot_forecast_mse_over_time(seed_fore_mse, seed, img_dir, 'cylinder')
+
+            # Latent dynamics plots
+            if seed_latent:
+                plot_latent_dynamics(seed_latent, train_end, LATENT_DIM, seed,
+                                    img_dir, 'cylinder')
 
     # Save results
     with open('cylinder_benchmark_results.json', 'w') as f:

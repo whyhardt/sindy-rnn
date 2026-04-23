@@ -29,9 +29,25 @@ def fit(
     interaction_only: bool = False,
     refit_epochs: int = 0,
     refit_learning_rate: Optional[float] = None,
+    dynamics_weight: float = 0.0,
+    stability_weight: float = 0.0,
+    centered_diff: bool = True,
     verbose: bool = True,
 ):
     """Train the PolynomialRNN.
+
+    The teacher-forced loss operates in derivative space: P(h) is compared
+    directly to the empirical derivative. By default, centered differences
+    (h[t+1] - h[t-1]) / (2*dt) are used for O(dt²) accuracy. Set
+    centered_diff=False for forward differences (h[t+1] - h[t]) / dt with
+    O(dt) accuracy (appropriate for discrete-time systems with large dt).
+
+    When dynamics_weight > 0, an autonomous forecast loss is added: the model
+    rolls out from h_0 via h[t+1] = h[t] + dt * P(h[t]) and the trajectory
+    is compared to the true states.
+
+    Total loss: E_deriv + dynamics_weight * E_fwd + l2 * |theta|
+                + stability_weight * relu(max|1 + dt*lambda| - 1)
 
     Args:
         model: PolynomialRNN instance
@@ -42,22 +58,28 @@ def fit(
         warmup_steps: epochs before pruning begins (default: epochs // 4)
         batch_size: mini-batch size over sequences (None = full batch)
         learning_rate: Adam learning rate
-        l2: L1 penalty weight on unfolded polynomial coefficients
+        l2: coefficient penalty weight on unfolded polynomial coefficients
         pruning_frequency: epochs between pruning events
-        pruning_threshold: minimum effect size delta for CI test (and threshold fallback).
-            When dt is provided, this is in continuous-time (ODE) units.
+        pruning_threshold: minimum effect size delta for pruning test.
         ensemble_pruning_alpha: confidence level alpha for ensemble CI test.
-            For method='median', this is the minimum sign-agreement fraction.
+            For method='median', unused.
         pruning_method: 'ci' for mean-based CI test,
-            'median' for median + sign-agreement (robust to bifurcation)
-        dt: timestep of the data. When provided, pruning operates on continuous-time
-            coefficients (c/dt), making pruning_threshold interpretable in ODE units.
+            'median' for median test (robust to bifurcation)
+        dt: timestep of the data (unused, kept for API compat).
         include_bias: if False, mask out constant term before training
         interaction_only: if True, mask out pure power terms before training
         refit_epochs: additional epochs with l2=0 and frozen mask after pruning.
-            Debiases coefficient estimates by removing L1 shrinkage on the
+            Debiases coefficient estimates by removing penalty shrinkage on the
             identified support. 0 = no refit (default).
         refit_learning_rate: learning rate for refit phase (default: learning_rate / 5)
+        dynamics_weight: weight on autonomous forecast loss relative to
+            derivative matching loss. 0.0 = derivative matching only (default).
+        stability_weight: weight on discrete Euler stability penalty.
+            Penalizes max|1 + dt*lambda| - 1 where lambda are eigenvalues of the
+            Jacobian. For degree=1 uses constant Jacobian; for degree>=2 evaluates
+            at subsampled training points. 0.0 = disabled (default).
+        centered_diff: if True (default), use centered differences for O(dt²)
+            derivative accuracy. Set to False for discrete-time systems (dt~1).
         verbose: print training progress every 50 epochs
     """
     if warmup_steps is None:
@@ -71,15 +93,12 @@ def fit(
             if len(term) >= 2 and len(set(term)) == 1:
                 model.coefficient_masks[:, :, t_idx] = False
 
-    # Use Adam (no weight decay) — L2 is applied on polynomial coefficients instead
-    optimizer = torch.optim.Adam(
-        model.parameters(), 
-        lr=learning_rate, 
-        # weight_decay=l2,
-    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     E = model.ensemble_size
     B, T = xs.shape[0], xs.shape[1]
+    n_states = model.n_states
+    model_dt = model.rnn._dt  # buffer, stays on correct device
 
     # Bootstrap: (B, T, F) -> (E, B, T, F), fixed for entire training
     if E > 1:
@@ -89,6 +108,38 @@ def fit(
     else:
         xs_train = xs.unsqueeze(0)
         ys_train = ys.unsqueeze(0)
+
+    def _derivative_matching_loss(xb, yb, theta_masked):
+        """Compute derivative matching loss.
+
+        When centered_diff=True (default): uses (h[t+1] - h[t-1]) / (2*dt)
+        for O(dt²) accuracy, evaluating P(h) at interior points t=1,...,T-2.
+        When centered_diff=False: uses (h[t+1] - h[t]) / dt with O(dt)
+        accuracy, evaluating P(h) at all timesteps.
+        """
+        if centered_diff:
+            # Centered difference: (h[t+1] - h[t-1]) / (2*dt)
+            h_prev = xb[:, :, :-2, :n_states]
+            h_next = yb[:, :, 1:-1, :]  # yb[t] = h[t+1]
+            dh_dt_target = (h_next - h_prev) / (2 * model_dt)
+
+            # Evaluate P(h) at interior points h[1]...h[T-2]
+            x_eval = xb[:, :, 1:-1, :n_states + model.rnn.n_controls]
+        else:
+            # Forward difference: (h[t+1] - h[t]) / dt
+            h_all = xb[:, :, :, :n_states]
+            dh_dt_target = (yb - h_all) / model_dt
+
+            x_eval = xb[:, :, :, :n_states + model.rnn.n_controls]
+
+        E_, Bb, T_inner, F_ = x_eval.shape
+        x_flat = x_eval.reshape(E_, Bb * T_inner, F_)
+        library = model.rnn._compute_library(x_flat)
+        P_h = torch.einsum('ebt,ent->ebn', library, theta_masked)
+        P_h = P_h.reshape(E_, Bb, T_inner, n_states)
+
+        valid = ~torch.isnan(dh_dt_target.sum(dim=-1))
+        return F.mse_loss(P_h[valid], dh_dt_target[valid])
 
     try:
         for epoch in range(epochs):
@@ -101,23 +152,53 @@ def fit(
             else:
                 xb, yb = xs_train, ys_train
 
-            ys_pred, _ = model(xb)  # (E, B, T, n_states)
+            theta = model.rnn.unfold_polynomial_coefficients()
+            theta_masked = theta * model.coefficient_masks.float()
 
-            # NaN mask for variable-length sequences
-            valid = ~torch.isnan(yb.sum(dim=-1))  # (E, B, T)
-            mse_loss = F.mse_loss(ys_pred[valid], yb[valid])
+            # Derivative matching loss (E_deriv): MSE(P(h), (y-h)/dt)
+            tf_loss = _derivative_matching_loss(xb, yb, theta_masked)
 
-            # L1 penalty on unfolded polynomial coefficients
-            if l2 > 0:
-                theta = model.rnn.unfold_polynomial_coefficients()  # (E, n_states, n_terms)
-                coeff_penalty = l2 * theta.abs().mean()
-                loss = mse_loss + coeff_penalty
+            # Autonomous forecast loss (E_fwd)
+            if dynamics_weight > 0:
+                h = xb[:, :, 0, :n_states]  # (E, Bb, n_states) — initial state
+                fwd_loss = 0.
+                T_win = xb.shape[2]
+                for k in range(T_win):
+                    u_k = xb[:, :, k, n_states:] if xb.shape[-1] > n_states else None
+                    h = model.rnn.forward_polynomial(
+                        h, u_k, mask=model.coefficient_masks, theta=theta
+                    )
+                    target = yb[:, :, k, :]
+                    valid_k = ~torch.isnan(target.sum(dim=-1))
+                    if valid_k.any():
+                        fwd_loss = fwd_loss + F.mse_loss(h[valid_k], target[valid_k])
+                fwd_loss = fwd_loss / T_win
             else:
-                loss = mse_loss
+                fwd_loss = 0.
+
+            loss = tf_loss + dynamics_weight * fwd_loss
+
+            # Coefficient penalty
+            if l2 > 0:
+                loss = loss + l2 * theta.abs().mean()
+
+            # Discrete Euler stability penalty
+            stab_val = 0.
+            if stability_weight > 0:
+                if model.rnn._degree > 1:
+                    h_sub = xb[:, :, ::10, :n_states].reshape(E, -1, n_states)
+                    u_sub = (xb[:, :, ::10, n_states:].reshape(E, -1, xb.shape[-1] - n_states)
+                             if xb.shape[-1] > n_states else None)
+                else:
+                    h_sub, u_sub = None, None
+                stab_loss = model.rnn.compute_stability_loss(
+                    theta_masked, model_dt, h_sub, u_sub)
+                loss = loss + stability_weight * stab_loss
+                stab_val = stab_loss.item()
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0)
             optimizer.step()
 
             # Pruning
@@ -134,18 +215,22 @@ def fit(
             if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
                 active = model.count_active_terms()
                 total_active = sum(active.values())
-                msg = f"Epoch {epoch:4d} | mse {mse_loss.item():.6f} | active terms: {total_active}"
+                msg = f"Epoch {epoch:4d} | deriv {tf_loss.item():.6f}"
+                if dynamics_weight > 0:
+                    fwd_val = fwd_loss.item() if isinstance(fwd_loss, torch.Tensor) else fwd_loss
+                    msg += f" | fwd {fwd_val:.6f}"
+                if stability_weight > 0:
+                    msg += f" | stab {stab_val:.6f}"
+                msg += f" | active terms: {total_active}"
                 if xs_test is not None and ys_test is not None:
                     with torch.no_grad():
                         model.eval()
                         x_te = xs_test.unsqueeze(0).expand(E, -1, -1, -1)
-                        yp_te, _ = model(x_te)
-                        valid_te = ~torch.isnan(ys_test.sum(dim=-1))
-                        y_te_exp = ys_test.unsqueeze(0).expand(E, -1, -1, -1)
-                        loss_te = F.mse_loss(
-                            yp_te[:, valid_te], y_te_exp[:, valid_te]
-                        )
-                        msg += f" | test loss {loss_te.item():.6f}"
+                        y_te = ys_test.unsqueeze(0).expand(E, -1, -1, -1)
+                        theta_te = model.rnn.unfold_polynomial_coefficients()
+                        theta_te_m = theta_te * model.coefficient_masks.float()
+                        loss_te = _derivative_matching_loss(x_te, y_te, theta_te_m)
+                        msg += f" | test {loss_te.item():.6f}"
                 print(msg)
     except KeyboardInterrupt:
         if verbose:
@@ -173,29 +258,40 @@ def fit(
                 else:
                     xb, yb = xs_train, ys_train
 
-                ys_pred, _ = model(xb)
+                theta = model.rnn.unfold_polynomial_coefficients()
+                theta_masked = theta * model.coefficient_masks.float()
 
-                valid = ~torch.isnan(yb.sum(dim=-1))
-                mse_loss = F.mse_loss(ys_pred[valid], yb[valid])
+                # Derivative matching (no L1, no autonomous)
+                loss = _derivative_matching_loss(xb, yb, theta_masked)
+
+                # Stability penalty persists through refit
+                if stability_weight > 0:
+                    if model.rnn._degree > 1:
+                        h_sub = xb[:, :, ::10, :n_states].reshape(E, -1, n_states)
+                        u_sub = (xb[:, :, ::10, n_states:].reshape(E, -1, xb.shape[-1] - n_states)
+                                 if xb.shape[-1] > n_states else None)
+                    else:
+                        h_sub, u_sub = None, None
+                    stab_loss = model.rnn.compute_stability_loss(
+                        theta_masked, model_dt, h_sub, u_sub)
+                    loss = loss + stability_weight * stab_loss
 
                 refit_optimizer.zero_grad()
-                mse_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0)
                 refit_optimizer.step()
 
                 if verbose and (epoch % 50 == 0 or epoch == refit_epochs - 1):
-                    msg = f"Refit {epoch:4d} | mse {mse_loss.item():.6f}"
+                    msg = f"Refit {epoch:4d} | deriv {loss.item():.6f}"
                     if xs_test is not None and ys_test is not None:
                         with torch.no_grad():
                             model.eval()
                             x_te = xs_test.unsqueeze(0).expand(E, -1, -1, -1)
-                            yp_te, _ = model(x_te)
-                            valid_te = ~torch.isnan(ys_test.sum(dim=-1))
-                            y_te_exp = ys_test.unsqueeze(0).expand(E, -1, -1, -1)
-                            loss_te = F.mse_loss(
-                                yp_te[:, valid_te], y_te_exp[:, valid_te]
-                            )
-                            msg += f" | test loss {loss_te.item():.6f}"
+                            y_te = ys_test.unsqueeze(0).expand(E, -1, -1, -1)
+                            theta_te = model.rnn.unfold_polynomial_coefficients()
+                            theta_te_m = theta_te * model.coefficient_masks.float()
+                            loss_te = _derivative_matching_loss(x_te, y_te, theta_te_m)
+                            msg += f" | test {loss_te.item():.6f}"
                     print(msg)
         except KeyboardInterrupt:
             if verbose:

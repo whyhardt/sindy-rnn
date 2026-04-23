@@ -1,8 +1,7 @@
 """Equation extraction and printing utilities.
 
-With the gated update h[t+1] = (1-alpha)*h[t] + alpha*P(h[t]), the ODE is
-recovered via: dh/dt = alpha*(P(h) - h) / dt. The unfold_ode_coefficients()
-method handles this conversion from discrete-time P to continuous-time ODE.
+With forward Euler h[t+1] = h[t] + dt * P(h[t]), the polynomial coefficients
+directly represent the ODE right-hand side dh/dt = P(h). No conversion needed.
 """
 
 from typing import Dict, Optional
@@ -14,8 +13,7 @@ from torch import Tensor
 def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
     """Return ODE coefficients for each state dimension.
 
-    Converts discrete-time polynomial coefficients to ODE form:
-        dh/dt = alpha * (P(h) - h) / dt
+    Coefficients directly represent the ODE dh/dt = P(h).
     Pruned terms are masked to zero.
 
     Returns:
@@ -52,8 +50,7 @@ def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
 def get_equations(model) -> str:
     """Return discovered ODE equations as a formatted multi-line string.
 
-    Converts discrete-time coefficients to ODE form:
-        dh/dt = alpha * (P(h) - h) / dt
+    Coefficients directly represent dh/dt = P(h).
 
     Example output:
         dx/dt = -10.000*x + 10.000*y
@@ -97,7 +94,7 @@ def get_continuous_equations(model, dt: float = None) -> str:
     """Return continuous-time ODE form of discovered equations.
 
     This is an alias for get_equations(). The dt parameter is kept
-    for backward compatibility but is ignored (the model's stored dt
-    is used for the discrete-to-continuous conversion).
+    for backward compatibility but is ignored (theta directly
+    represents the ODE).
     """
     return get_equations(model)
