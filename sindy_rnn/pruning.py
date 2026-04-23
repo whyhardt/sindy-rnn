@@ -1,7 +1,10 @@
 """Pruning system: ensemble CI test, patience mechanism, and threshold fallback.
 
-With Euler parameterization, theta directly represents ODE coefficients.
-No gate absorption or discrete-to-continuous conversion is needed.
+Pruning operates on discrete-time polynomial coefficients (theta_P), which
+represent the learned polynomial in h[t+1] = (1-alpha)*h + alpha*P(h). The
+pruning threshold (delta) is specified by the user in ODE units and converted
+to discrete-time units internally via delta_discrete = delta * dt / alpha
+(since theta_ode = alpha * theta_P / dt).
 """
 
 import torch
@@ -84,10 +87,11 @@ def median_effect_test(
 
 
 def _get_effective_coefficients_raw(model) -> Tensor:
-    """Return raw ODE coefficients (masked).
+    """Return raw discrete-time polynomial coefficients (masked).
 
-    With Euler parameterization, theta directly represents dh/dt = P(h).
-    No gate absorption or self-term correction needed.
+    Returns theta_P from the gated update h[t+1] = (1-alpha)*h + alpha*P(h).
+    Pruning uses these discrete-time coefficients, with the threshold
+    converted from ODE to discrete units via delta_disc = delta * dt / alpha.
     """
     theta = model.rnn.unfold_polynomial_coefficients().detach()  # (E, n_states, n_terms)
     return theta
@@ -100,21 +104,30 @@ def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
     Args:
         model: PolynomialRNN instance
         alpha: significance level for CI test, or unused for median test
-        delta: minimum effect size threshold (in ODE units)
-        dt: unused (kept for backward compat). Theta is already in ODE units.
+        delta: minimum effect size threshold (in ODE units).
+            Internally converted to discrete-time units:
+            delta_disc = delta * dt / alpha_gate
+            (since theta_ode = alpha_gate * theta_P / dt).
+        dt: physical timestep (if None, uses model's stored dt).
         method: 'ci' for mean-based confidence interval test,
                 'median' for median test (robust to bifurcation)
     """
     theta = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
     mask = model.coefficient_masks  # (E, n_states, n_terms)
 
+    # Convert threshold from ODE units to discrete-time units
+    # ODE coef = alpha_gate * theta_P / dt, so |theta_P| > delta * dt / alpha_gate
+    dt_val = dt if dt is not None else model.rnn._dt.item()
+    alpha_val = model.rnn._alpha.item()
+    delta_discrete = delta * dt_val / alpha_val
+
     if method == 'median':
         significant = median_effect_test(
-            theta, mask, delta=delta
+            theta, mask, delta=delta_discrete
         )
     else:
         significant = minimum_effect_ci_test(
-            theta, mask, alpha=alpha, delta=delta
+            theta, mask, alpha=alpha, delta=delta_discrete
         )  # (n_states, n_terms)
 
     still_active = mask.any(dim=0)  # (n_states, n_terms)
@@ -137,11 +150,14 @@ def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
 def threshold_patience_update(model, threshold: float, dt: float = None):
     """Increment patience for terms with |coefficient| < threshold.
 
-    Threshold is in ODE units (theta directly represents dh/dt).
-    dt parameter is unused (kept for backward compat).
+    Threshold is in ODE units. Internally converted to discrete-time units
+    via threshold_discrete = threshold * dt / alpha_gate.
     """
+    dt_val = dt if dt is not None else model.rnn._dt.item()
+    alpha_val = model.rnn._alpha.item()
+    threshold_discrete = threshold * dt_val / alpha_val
     theta = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
-    below = (theta.abs() < threshold) & model.coefficient_masks
+    below = (theta.abs() < threshold_discrete) & model.coefficient_masks
     model.pruning_patience = torch.where(
         below,
         model.pruning_patience + 1,

@@ -94,11 +94,11 @@ def test_forward_polynomial_no_mask_equals_mask_ones(n_states, n_controls, degre
     torch.testing.assert_close(h_no_mask, h_with_mask, rtol=1e-5, atol=1e-6)
 
 
-def test_masking_removes_polynomial_keeps_identity():
-    """Masking ALL polynomial terms gives h[t+1] = h[t] (identity, no decay).
+def test_masking_removes_polynomial_gives_decay():
+    """Masking ALL polynomial terms gives h[t+1] = (1-alpha)*h[t] (decay).
 
-    With Euler parameterization, masking all terms zeros P(h), so
-    h[t+1] = h[t] + dt * 0 = h[t].
+    With gated parameterization, masking all terms zeros P(h), so
+    h[t+1] = (1-alpha) * h[t] + alpha * 0 = (1-alpha) * h[t].
     """
     torch.manual_seed(99)
 
@@ -116,8 +116,10 @@ def test_masking_removes_polynomial_keeps_identity():
 
     h_next = model.rnn.forward_polynomial(h, None, mask=mask)
 
-    # For dimension 0, the result should be h[:, :, 0] (identity)
-    torch.testing.assert_close(h_next[:, :, 0], h[:, :, 0], rtol=1e-5, atol=1e-6)
+    # For dimension 0, the result should be (1 - alpha) * h[:, :, 0]
+    alpha = model.rnn._alpha.item()
+    expected = (1 - alpha) * h[:, :, 0]
+    torch.testing.assert_close(h_next[:, :, 0], expected, rtol=1e-5, atol=1e-6)
 
 
 def test_sequence_forward_shape():
@@ -137,8 +139,8 @@ def test_sequence_forward_shape():
 
 
 @pytest.mark.parametrize("dt", [0.01, 0.1, 1.0])
-def test_dt_scaling(dt):
-    """Verify that dt scales the polynomial output correctly."""
+def test_gated_update(dt):
+    """Verify that the gated update h[t+1] = (1-alpha)*h + alpha*P(h) is correct."""
     torch.manual_seed(42)
 
     model = PolynomialRNN(
@@ -151,13 +153,14 @@ def test_dt_scaling(dt):
 
     h_next = model.rnn._forward_impl(h, None)
 
-    # Compute expected: h + dt * P(h)
+    # Compute expected: (1 - alpha) * h + alpha * P(h)
+    alpha = model.rnn._alpha
     if model.rnn._direct:
         x_t = h
         library = model.rnn._compute_library(x_t)
         P_h = torch.einsum('ebt,ent->ebn', library, model.rnn.theta)
     else:
         P_h = model.rnn.projection(h)
-    expected = h + dt * P_h
+    expected = (1 - alpha) * h + alpha * P_h
 
     torch.testing.assert_close(h_next, expected, rtol=1e-5, atol=1e-6)

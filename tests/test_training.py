@@ -8,8 +8,10 @@ from sindy_rnn import PolynomialRNN, fit
 def test_linear_system_recovery():
     """Known x[t+1] = 0.9*x + 0.1*u -> verify ODE coefficients recovered.
 
-    With Euler (dt=1): x[t+1] = x + P(x,u), so P(x,u) = -0.1*x + 0.1*u.
-    get_coefficients returns ODE coefficients (raw theta).
+    With gated update (dt=1, alpha=1): x[t+1] = (1-1)*x + 1*P(x,u) = P(x,u).
+    P learns x[t+1] directly: P(x,u) = 0.9*x + 0.1*u.
+    ODE extraction: theta_ode = alpha*theta_P/dt, diagonal -= alpha/dt.
+    So theta_ode[x] = 1*0.9/1 - 1/1 = -0.1, theta_ode[u] = 1*0.1/1 = 0.1.
     """
     torch.manual_seed(42)
 

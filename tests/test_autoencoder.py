@@ -256,7 +256,7 @@ class TestEquationExtraction:
             state_names=['z1', 'z2', 'z3'],
         )
         eqs = model.get_equations()
-        # With Euler parameterization, equations are in ODE form
+        # Equations are in ODE form (converted from discrete-time P to continuous)
         assert 'dz1/dt' in eqs
         assert 'dz2/dt' in eqs
         assert 'dz3/dt' in eqs
@@ -374,21 +374,29 @@ class TestFitAutoencoder:
             ensemble_size=1, polynomial_degree=1,
         )
 
-        # Record initial loss
-        model.eval()
-        with torch.no_grad():
-            fp, _, _ = model(sparse_obs)
-            loss_init = torch.nn.functional.mse_loss(fp, full_state.unsqueeze(0)).item()
+        def _forecast_loss():
+            """Evaluate using autonomous forecast (matches training objective)."""
+            model.eval()
+            with torch.no_grad():
+                encoded = model.encoder(sparse_obs.unsqueeze(0))  # (1, B, T, latent)
+                theta = model.dynamics.rnn.unfold_polynomial_coefficients()
+                z = encoded[:, :, 0, :]
+                preds = []
+                for k in range(T):
+                    z = model.dynamics.rnn.forward_polynomial(
+                        z, None, mask=model.dynamics.coefficient_masks, theta=theta
+                    )
+                    preds.append(model.decoder(z))
+                preds = torch.stack(preds, dim=2)  # (1, B, T, full_dim)
+                return torch.nn.functional.mse_loss(preds, full_state.unsqueeze(0)).item()
+
+        loss_init = _forecast_loss()
 
         # Train
         fit_autoencoder(model, sparse_obs, full_state,
                         epochs=100, learning_rate=1e-3, l1=0, verbose=False)
 
-        # Record final loss
-        model.eval()
-        with torch.no_grad():
-            fp, _, _ = model(sparse_obs)
-            loss_final = torch.nn.functional.mse_loss(fp, full_state.unsqueeze(0)).item()
+        loss_final = _forecast_loss()
 
         assert loss_final < loss_init, f"Loss did not decrease: {loss_init:.6f} -> {loss_final:.6f}"
 

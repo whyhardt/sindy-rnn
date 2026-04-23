@@ -74,11 +74,11 @@ SHRED_THRES_EPOCH = 100
 # sindy-rnn
 RNN_WINDOW = 52         # 1 year windows
 RNN_ENSEMBLE = 11
-RNN_EPOCHS = 1000
-RNN_WARMUP = 200
+RNN_EPOCHS = 10000
+RNN_WARMUP = 500
 RNN_LR = 1e-3
-RNN_L1 = 0#1e-3
-RNN_PRUNE_THRESHOLD = 0#0.01
+RNN_L1 = 0
+RNN_PRUNE_THRESHOLD = 0.01
 RNN_PRUNE_FREQ = 100
 RNN_REFIT = 100
 RNN_GRU_HIDDEN = None  # match SINDy-SHRED: GRU hidden_size = latent_dim
@@ -403,7 +403,7 @@ def run_sindy_rnn(X, sensor_locs, train_end, full_dim, seed, save_dir=None):
         sparse_dim=NUM_SENSORS, full_dim=full_dim, latent_dim=LATENT_DIM,
         ensemble_size=RNN_ENSEMBLE, polynomial_degree=POLY_ORDER,
         dt=DT,
-        encoder_type='gru',
+        # encoder_type='gru',
         encoder_gru_hidden_dim=RNN_GRU_HIDDEN,
         encoder_num_layers=GRU_LAYERS,
         decoder_hidden_dims=[DECODER_L1, DECODER_L2],

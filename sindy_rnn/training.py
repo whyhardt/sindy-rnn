@@ -107,10 +107,9 @@ def fit(
             valid = ~torch.isnan(yb.sum(dim=-1))  # (E, B, T)
             mse_loss = F.mse_loss(ys_pred[valid], yb[valid])
 
-            # L2 penalty on unfolded polynomial coefficients
+            # L1 penalty on unfolded polynomial coefficients
             if l2 > 0:
                 theta = model.rnn.unfold_polynomial_coefficients()  # (E, n_states, n_terms)
-                # coeff_penalty = l2 * (theta ** 2).mean()
                 coeff_penalty = l2 * theta.abs().mean()
                 loss = mse_loss + coeff_penalty
             else:

@@ -1,8 +1,8 @@
 """Equation extraction and printing utilities.
 
-With the Euler parameterization h[t+1] = h[t] + dt*P(h[t]), the polynomial
-coefficients theta directly represent the ODE right-hand side dh/dt = P(h).
-No gate absorption or discrete-to-continuous conversion is needed.
+With the gated update h[t+1] = (1-alpha)*h[t] + alpha*P(h[t]), the ODE is
+recovered via: dh/dt = alpha*(P(h) - h) / dt. The unfold_ode_coefficients()
+method handles this conversion from discrete-time P to continuous-time ODE.
 """
 
 from typing import Dict, Optional
@@ -12,17 +12,18 @@ from torch import Tensor
 
 
 def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
-    """Return polynomial coefficients for each state dimension.
+    """Return ODE coefficients for each state dimension.
 
-    With Euler parameterization, theta directly represents ODE coefficients
-    (dh/dt = P(h)). Pruned terms are masked to zero.
+    Converts discrete-time polynomial coefficients to ODE form:
+        dh/dt = alpha * (P(h) - h) / dt
+    Pruned terms are masked to zero.
 
     Returns:
         dict mapping state_name -> Tensor
             aggregate=True:  (n_terms,) ensemble mean (NaN-aware, pruned->0)
             aggregate=False: (E, n_terms) per-member
     """
-    theta = model.rnn.unfold_polynomial_coefficients().detach()  # (E, n_states, n_terms)
+    theta = model.rnn.unfold_ode_coefficients().detach()  # (E, n_states, n_terms)
     mask = model.coefficient_masks.float()  # (E, n_states, n_terms)
 
     # Apply mask — theta * mask gives active ODE coefficients
@@ -51,7 +52,8 @@ def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
 def get_equations(model) -> str:
     """Return discovered ODE equations as a formatted multi-line string.
 
-    With Euler parameterization, theta directly represents dh/dt = P(h).
+    Converts discrete-time coefficients to ODE form:
+        dh/dt = alpha * (P(h) - h) / dt
 
     Example output:
         dx/dt = -10.000*x + 10.000*y
@@ -94,8 +96,8 @@ def get_equations(model) -> str:
 def get_continuous_equations(model, dt: float = None) -> str:
     """Return continuous-time ODE form of discovered equations.
 
-    With Euler parameterization, theta directly represents the ODE.
     This is an alias for get_equations(). The dt parameter is kept
-    for backward compatibility but is ignored.
+    for backward compatibility but is ignored (the model's stored dt
+    is used for the discrete-to-continuous conversion).
     """
     return get_equations(model)

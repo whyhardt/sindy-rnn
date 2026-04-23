@@ -1,28 +1,22 @@
 """Encoder-decoder architecture for sparse observation settings.
 
 Wraps PolynomialRNN with encoder/decoder to learn latent dynamics
-from sparse measurements via teacher-forced next-state prediction:
+from sparse measurements via autonomous forecast training:
 
-    z_t = encoder(sparse_obs_t)                         # encode current sensors to latent
-    z_{t+1} = z_t + dt * P(z_t)                         # forward Euler step (P ≈ dz/dt)
-    full_pred_{t+1} = decoder(z_{t+1})                  # decode predicted next state
+    z_0 = encoder(sparse_obs_0)                         # encode initial state
+    z_k = dynamics(z_{k-1})  for k = 1..T              # autonomous rollout
+    loss = MSE(decoder(z_k), full_state_k)              # decoded full-state MSE
+
+No teacher forcing — the dynamics must predict the full window
+autonomously from the first encoded state. This forces P(h) to learn
+real dynamics instead of collapsing to identity.
+
+The ODE is recovered analytically: dz/dt = alpha * (P(z) - z) / dt.
 
 Two encoder types:
   - MLP: processes each timestep independently (no temporal context)
   - GRU: accumulates temporal context from the sensor sequence, providing
     better state estimation from sparse measurements (Takens' delay embedding)
-
-Teacher forcing: at each training step, z_t comes from encoding the ACTUAL
-sensors (not the model's own prediction). The polynomial P(z) operates
-autonomously on the latent state — no sensor terms in the polynomial library.
-The discovered equations are dz/dt = P(z) only.
-
-At forecast time, the encoder provides z_0 from the last observation,
-then the polynomial evolves z forward without any sensor input:
-    z_0 = encoder(sensors_0)
-    z_1 = z_0 + dt * P(z_0)
-    z_2 = z_1 + dt * P(z_1)
-    ...
 """
 
 from typing import Dict, List, Optional, Union
@@ -193,13 +187,15 @@ class MLPDecoder(nn.Module):
 class SparseAutoencoderRNN(nn.Module):
     """Encoder-decoder wrapper around PolynomialRNN for sparse observation settings.
 
-    Architecture (teacher-forced next-state prediction with forward Euler):
+    Architecture (teacher-forced next-state prediction with gated update):
         z_t = encoder(sparse_obs_t)                          # encode sensors to latent
-        z_{t+1} = z_t + dt * P(z_t [, u_t])                 # forward Euler (P ≈ dz/dt)
+        z_{t+1} = (1 - alpha) * z_t + P(z_t [, u_t])       # gated polynomial update
         full_pred_{t+1} = decoder(z_{t+1})                   # decode to full state
 
+    The ODE is recovered: dz/dt = (P(z) - alpha*z) / dt.
+
     The encoder maps sparse sensors to latent coordinates at each timestep.
-    The polynomial RNN predicts the next latent state via forward Euler.
+    The polynomial RNN predicts the next latent state via gated update.
     The decoder maps back to full state. Teacher forcing: z_t always comes
     from encoding actual sensors, not from the model's own predictions.
 
@@ -209,8 +205,9 @@ class SparseAutoencoderRNN(nn.Module):
         providing better state estimation from sparse measurements
 
     The polynomial P operates only on the latent state z (and optional external
-    controls u) and directly represents the ODE dz/dt = P(z). The small dt
-    provides implicit stability bias for autonomous forecasting.
+    controls u). The gated update provides stability while allowing strong
+    gradient flow through P. The (1-alpha) mixing provides implicit damping
+    for autonomous forecasting.
 
     The encoder and decoder are shared across ensemble members. Only the inner
     PolynomialRNN has E independent members. Pruning and equation extraction
@@ -260,6 +257,7 @@ class SparseAutoencoderRNN(nn.Module):
         dynamics_feature_dropout: float = 0.,
         decomposed: bool = True,
         direct: bool = False,
+        alpha: float = None,
     ):
         super().__init__()
         self.sparse_dim = sparse_dim
@@ -295,6 +293,8 @@ class SparseAutoencoderRNN(nn.Module):
             feature_dropout=dynamics_feature_dropout,
             decomposed=decomposed,
             direct=direct,
+            alpha=alpha,
+            compiled_forward=True,
         )
 
     @property
@@ -411,6 +411,7 @@ class SparseAutoencoderRNN(nn.Module):
             'ensemble_size': self.dynamics.ensemble_size,
             'polynomial_degree': self.dynamics.rnn._degree,
             'dt': self.dynamics.rnn._dt.item(),
+            'alpha': self.dynamics.rnn._alpha.item(),
             'state_names': self.dynamics.state_names,
             'decomposed': self.dynamics.rnn._decomposed,
             'direct': self.dynamics.rnn._direct,
@@ -436,6 +437,8 @@ class SparseAutoencoderRNN(nn.Module):
             config['direct'] = False
         if 'dt' not in config:
             config['dt'] = 1.0
+        if 'alpha' not in config:
+            config['alpha'] = config['dt']
         model = cls(**config)
         model.load_state_dict(checkpoint['state_dict'], strict=False)
         model.dynamics.coefficient_masks.copy_(checkpoint['coefficient_masks'])
@@ -467,13 +470,12 @@ def fit_autoencoder(
     refit_learning_rate: Optional[float] = None,
     verbose: bool = True,
 ):
-    """Train the SparseAutoencoderRNN.
+    """Train the SparseAutoencoderRNN via autonomous forecast.
 
-    End-to-end training: sparse_obs -> encoder -> PolynomialRNN -> decoder -> full_state_next.
-    Loss = prediction MSE + L1 on polynomial coefficients.
-
-    The prediction target is the full state at the NEXT timestep:
-        encoder(sparse_obs_t) -> z_t -> P(z_t) -> z_{t+1} -> decoder -> full_state_{t+1}
+    Encodes the sensor window, starts from the first encoded latent state,
+    rolls out autonomously for the full window (T steps), decodes each
+    prediction to full state, and computes MSE against ground truth.
+    No teacher forcing — forces the dynamics P(h) to learn real transitions.
 
     Args:
         model: SparseAutoencoderRNN instance
@@ -563,20 +565,30 @@ def fit_autoencoder(
                 batch_idx = None
             sparse_b, full_next_b, ctrl_b = _get_batch(batch_idx)
 
-            # Forward: encode -> polynomial dynamics -> decode
-            full_pred, _, _ = model(sparse_b, controls=ctrl_b)  # (E, Bb, T, full_dim)
+            # Encode → autonomous rollout → decode → full-state MSE
+            encoded = model.encoder(sparse_b)  # (E, Bb, T, latent_dim)
+            theta = dynamics.rnn.unfold_polynomial_coefficients()
 
-            # NaN mask for variable-length sequences
-            valid = ~torch.isnan(full_next_b.sum(dim=-1))  # (E, Bb, T)
-            pred_loss = F.mse_loss(full_pred[valid], full_next_b[valid])
+            T_win = encoded.shape[2]
+            z = encoded[:, :, 0, :]  # (E, Bb, latent_dim)
 
-            # L1 on unfolded polynomial coefficients
+            fc_loss = 0.
+            for k in range(T_win):
+                u_k = ctrl_b[:, :, k, :] if ctrl_b is not None else None
+                z = dynamics.rnn.forward_polynomial(
+                    z, u_k, mask=dynamics.coefficient_masks, theta=theta
+                )
+                decoded = model.decoder(z)  # (E, Bb, full_dim)
+                target = full_next_b[:, :, k, :]  # (E, Bb, full_dim)
+                valid_k = ~torch.isnan(target.sum(dim=-1))  # (E, Bb)
+                if valid_k.any():
+                    fc_loss += F.mse_loss(decoded[valid_k], target[valid_k])
+            fc_loss = fc_loss / T_win
+
+            loss = fc_loss
             if l1 > 0:
-                theta = dynamics.rnn.unfold_polynomial_coefficients()
-                coeff_penalty = l1 * theta.abs().mean()
-                loss = pred_loss + coeff_penalty
-            else:
-                loss = pred_loss
+                loss = loss + l1 * theta.abs().mean()
+            loss_val = fc_loss.item()
 
             optimizer.zero_grad()
             loss.backward()
@@ -584,7 +596,7 @@ def fit_autoencoder(
             optimizer.step()
 
             # Free training batch tensors to reduce memory for test eval / pruning
-            del full_pred, full_next_b, sparse_b, ctrl_b, loss
+            del full_next_b, sparse_b, ctrl_b, encoded, loss
 
             # Pruning
             if epoch >= warmup_steps and epoch % pruning_frequency == 0:
@@ -600,7 +612,7 @@ def fit_autoencoder(
             if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
                 active = dynamics.count_active_terms()
                 total_active = sum(active.values())
-                msg = f"Epoch {epoch:4d} | pred {pred_loss.item():.6f} | active terms: {total_active}"
+                msg = f"Epoch {epoch:4d} | loss {loss_val:.6f} | active terms: {total_active}"
                 if sparse_obs_test is not None and full_state_next_test is not None:
                     with torch.no_grad():
                         loss_te = _test_loss()
@@ -632,18 +644,34 @@ def fit_autoencoder(
                     batch_idx = None
                 sparse_b, full_next_b, ctrl_b = _get_batch(batch_idx)
 
-                full_pred, _, _ = model(sparse_b, controls=ctrl_b)
+                # Autonomous rollout (same as main loop, no L1)
+                encoded = model.encoder(sparse_b)
+                theta = dynamics.rnn.unfold_polynomial_coefficients()
 
-                valid = ~torch.isnan(full_next_b.sum(dim=-1))
-                pred_loss = F.mse_loss(full_pred[valid], full_next_b[valid])
+                T_win = encoded.shape[2]
+                z = encoded[:, :, 0, :]
+
+                fc_loss = 0.
+                for k in range(T_win):
+                    u_k = ctrl_b[:, :, k, :] if ctrl_b is not None else None
+                    z = dynamics.rnn.forward_polynomial(
+                        z, u_k, mask=dynamics.coefficient_masks, theta=theta
+                    )
+                    decoded = model.decoder(z)
+                    target = full_next_b[:, :, k, :]
+                    valid_k = ~torch.isnan(target.sum(dim=-1))
+                    if valid_k.any():
+                        fc_loss += F.mse_loss(decoded[valid_k], target[valid_k])
+                loss = fc_loss / T_win
+                loss_val = loss.item()
 
                 refit_optimizer.zero_grad()
-                pred_loss.backward()
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 refit_optimizer.step()
 
                 if verbose and (epoch % 50 == 0 or epoch == refit_epochs - 1):
-                    msg = f"Refit {epoch:4d} | pred {pred_loss.item():.6f}"
+                    msg = f"Refit {epoch:4d} | loss {loss_val:.6f}"
                     if sparse_obs_test is not None and full_state_next_test is not None:
                         with torch.no_grad():
                             loss_te = _test_loss()

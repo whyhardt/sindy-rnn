@@ -157,12 +157,17 @@ class DecomposedPolynomialLayer(nn.Module):
 
 
 class EnsembleRNNModule(nn.Module):
-    """Forward Euler recurrent cell built on a polynomial layer.
+    """Gated recurrent cell built on a polynomial layer.
 
-    The polynomial P represents the ODE right-hand side dh/dt = P(h, u):
+    The polynomial P operates in discrete-time with a learnable mixing
+    coefficient alpha:
         x_t    = concat(h[t], u[t])         # (E, B, n_features)
-        c      = PolynomialLayer(x_t)       # (E, B, n_states)  — P(h, u) ≈ dh/dt
-        h[t+1] = h[t] + dt * c              # forward Euler step
+        c      = PolynomialLayer(x_t)       # (E, B, n_states)
+        h[t+1] = (1 - alpha) * h[t] + alpha * c    # gated update
+
+    The ODE right-hand side is recovered analytically:
+        dh/dt = alpha * (P(h) - h) / dt
+    where dt is the physical timestep of the data (stored as buffer).
     """
 
     def __init__(
@@ -177,6 +182,7 @@ class EnsembleRNNModule(nn.Module):
         polynomial_degree: int = 2,
         decomposed: bool = True,
         direct: bool = False,
+        alpha: float = None,
     ):
         super().__init__()
         n_features = n_states + n_controls
@@ -188,8 +194,18 @@ class EnsembleRNNModule(nn.Module):
         self._direct = direct
         self._degree = polynomial_degree
 
-        # Timestep for forward Euler integration
+        # Physical timestep (for ODE coefficient extraction, not used in forward)
         self.register_buffer('_dt', torch.tensor(float(dt)))
+
+        # Learnable mixing coefficient: h[t+1] = (1 - alpha) * h + alpha * P(h)
+        # Store raw logit; apply sigmoid in forward to get alpha in (0, 1)
+        if alpha is not None:
+            # Inverse sigmoid to initialize at desired alpha value
+            alpha = max(min(alpha, 1 - 1e-6), 1e-6)
+            logit = torch.log(torch.tensor(alpha / (1 - alpha)))
+        else:
+            logit = torch.tensor(0.)  # sigmoid(0) = 0.5
+        self._alpha_logit = nn.Parameter(logit)
 
         # Precompute library structure over n_features (needed before direct theta init)
         lib = build_library_structure(n_features, polynomial_degree)
@@ -233,15 +249,19 @@ class EnsembleRNNModule(nn.Module):
             except Exception:
                 self._compiled_forward = None
 
+    @property
+    def _alpha(self):
+        return torch.sigmoid(self._alpha_logit)
+
     def _forward_impl(self, h, u=None):
-        """Core forward implementation: h[t+1] = h[t] + dt * P(h[t], u[t])."""
+        """Core forward implementation: h[t+1] = (1 - alpha) * h[t] + alpha * P(h[t], u[t])."""
         x_t = torch.cat([h, u], dim=-1) if u is not None else h
         if self._direct:
             library = self._compute_library(x_t)
             c = torch.einsum('ebt,ent->ebn', library, self.theta)
         else:
             c = self.projection(x_t)
-        return h + self._dt * c
+        return (1 - self._alpha) * h + self._alpha * c
 
     def forward(self, h, u=None):
         """Standard forward pass (training — gradients flow through polynomial layer).
@@ -259,11 +279,12 @@ class EnsembleRNNModule(nn.Module):
     def forward_polynomial(self, h, u=None, mask=None, theta=None):
         """Compute next hidden state via the explicit polynomial representation.
 
-        Uses forward Euler: h[t+1] = h[t] + dt * P(h[t], u[t])
-        where P is the polynomial with coefficients theta (representing dh/dt).
+        Uses gated update: h[t+1] = (1 - alpha) * h[t] + alpha * P(h[t], u[t])
+        where P is the polynomial with coefficients theta (discrete-time).
 
         Mask is applied to theta before computing the polynomial output.
-        The identity h[t] is always present (architectural, not subject to masking).
+        The gated identity (1-alpha)*h[t] is always present (architectural,
+        not subject to masking).
 
         Args:
             h: (E, B, n_states) — current hidden state
@@ -279,21 +300,39 @@ class EnsembleRNNModule(nn.Module):
 
         x_t = torch.cat([h, u], dim=-1) if u is not None else h  # (E, B, n+m)
 
-        # Feature dropout: zero entire feature columns during training
-        if self.training and self.feature_dropout_p > 0:
-            feat_mask = torch.bernoulli(
-                torch.full(x_t.shape[-1:], 1 - self.feature_dropout_p,
-                           device=x_t.device)
-            )  # (n_features,)
-            x_t = x_t * feat_mask / (1 - self.feature_dropout_p)
-
         library = self._compute_library(x_t)  # (E, B, n_terms)
         n = torch.einsum('ebt,ent->ebn', library, theta)  # (E, B, n_states)
 
-        return h + self._dt * n
+        return (1 - self._alpha) * h + self._alpha * n
+
+    def unfold_ode_coefficients(self) -> Tensor:
+        """Convert discrete-time polynomial coefficients to ODE coefficients.
+
+        The gated update h[t+1] = (1 - alpha) * h + alpha * P(h) corresponds to:
+            dh/dt = alpha * (P(h) - h) / dt
+
+        So the ODE coefficients are:
+            theta_ode[i, j] = alpha * theta_P[i, j] / dt       (all terms)
+            theta_ode[i, self_i] -= alpha / dt                  (identity correction)
+
+        Returns:
+            theta_ode: (E, n_states, n_terms) — ODE coefficients
+        """
+        theta_p = self.unfold_polynomial_coefficients()  # (E, n_states, n_terms)
+        theta_ode = self._alpha * theta_p / self._dt
+
+        # Subtract alpha/dt from diagonal linear terms (identity contribution)
+        for i in range(self.n_states):
+            lin_idx = self._linear_indices[i].item()
+            theta_ode[:, i, lin_idx] = theta_ode[:, i, lin_idx] - self._alpha / self._dt
+
+        return theta_ode
 
     def unfold_polynomial_coefficients(self) -> Tensor:
-        """Return polynomial coefficients in monomial basis.
+        """Return discrete-time polynomial coefficients in monomial basis.
+
+        These are the raw coefficients of P in h[t+1] = (1-alpha)*h + alpha*P(h).
+        For ODE coefficients, use unfold_ode_coefficients() instead.
 
         For direct mode, returns self.theta directly.
         For factored modes, unfolds weight matrices via recursive expansion.
@@ -448,6 +487,7 @@ class PolynomialRNN(nn.Module):
         initial_state: Union[float, Tensor] = 0.,
         decomposed: bool = True,
         direct: bool = False,
+        alpha: float = None,
     ):
         super().__init__()
         self.n_states = n_states
@@ -466,6 +506,7 @@ class PolynomialRNN(nn.Module):
             polynomial_degree=polynomial_degree,
             decomposed=decomposed,
             direct=direct,
+            alpha=alpha,
         )
 
         n_library_terms = self.rnn._n_library_terms
@@ -570,6 +611,7 @@ class PolynomialRNN(nn.Module):
                 'ensemble_size': self.ensemble_size,
                 'polynomial_degree': self.rnn._degree,
                 'dt': self.rnn._dt.item(),
+                'alpha': self.rnn._alpha.item(),
                 'state_names': self.state_names,
                 'control_names': self.control_names,
                 'decomposed': self.rnn._decomposed,
@@ -589,6 +631,9 @@ class PolynomialRNN(nn.Module):
             config['direct'] = False
         if 'dt' not in config:
             config['dt'] = 1.0
+        # alpha defaults to dt for old checkpoints (Euler equivalent)
+        if 'alpha' not in config:
+            config['alpha'] = config['dt']
         model = cls(**config)
         model.load_state_dict(checkpoint['state_dict'], strict=False)
         model.coefficient_masks.copy_(checkpoint['coefficient_masks'])
