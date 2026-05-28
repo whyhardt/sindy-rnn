@@ -208,6 +208,12 @@ class EnsembleRNNModule(nn.Module):
         self.register_buffer('_mult_table', lib['mult_table'])
         self.register_buffer('_linear_indices', lib['linear_indices'])
 
+        # Precompute vectorized library index arrays for fast _compute_library
+        self._build_library_index_arrays()
+
+        # Precompute src/tgt index pairs for compile-friendly unfolding
+        self._build_unfolding_index_arrays()
+
         # Precompute derivative lookup tables for Jacobian computation
         self._build_derivative_table()
 
@@ -239,11 +245,21 @@ class EnsembleRNNModule(nn.Module):
         self.feature_dropout_p = feature_dropout
 
         self._compiled_forward = None
-        if compiled_forward and not direct:
+        self._compiled_unfold = None
+        self._compiled_evaluate_rhs = None
+        if compiled_forward:
             try:
-                self._compiled_forward = torch.compile(self._forward_impl, dynamic=True)
+                if not direct:
+                    self._compiled_forward = torch.compile(
+                        self._forward_impl, dynamic=True)
+                self._compiled_unfold = torch.compile(
+                    self._unfold_impl, dynamic=True)
+                self._compiled_evaluate_rhs = torch.compile(
+                    self._evaluate_rhs_impl, dynamic=True)
             except Exception:
                 self._compiled_forward = None
+                self._compiled_unfold = None
+                self._compiled_evaluate_rhs = None
 
     def _forward_impl(self, h, u=None):
         """Core forward: num_euler_steps sub-steps of h += (dt/N) * P(h, u)."""
@@ -271,8 +287,8 @@ class EnsembleRNNModule(nn.Module):
             return self._compiled_forward(h, u)
         return self._forward_impl(h, u)
 
-    def _evaluate_rhs(self, h, u, theta):
-        """Evaluate the polynomial RHS: dh/dt = P(h, u).
+    def _evaluate_rhs_impl(self, h, u, theta):
+        """Implementation of RHS evaluation (compile target).
 
         Args:
             h: (E, B, n_states) — current state
@@ -284,6 +300,15 @@ class EnsembleRNNModule(nn.Module):
         x_t = torch.cat([h, u], dim=-1) if u is not None else h
         library = self._compute_library(x_t)
         return torch.einsum('ebt,ent->ebn', library, theta)
+
+    def _evaluate_rhs(self, h, u, theta):
+        """Evaluate the polynomial RHS: dh/dt = P(h, u).
+
+        Dispatches to compiled version when available.
+        """
+        if self._compiled_evaluate_rhs is not None:
+            return self._compiled_evaluate_rhs(h, u, theta)
+        return self._evaluate_rhs_impl(h, u, theta)
 
     def forward_polynomial(self, h, u=None, mask=None, theta=None,
                            integrator='euler'):
@@ -337,6 +362,18 @@ class EnsembleRNNModule(nn.Module):
         """
         return self.unfold_polynomial_coefficients()
 
+    def _unfold_impl(self) -> Tensor:
+        """Implementation of coefficient unfolding (compile target).
+
+        Dispatches to direct/decomposed/coupled based on mode flags.
+        All paths use precomputed index buffers (no torch.where).
+        """
+        if self._direct:
+            return self.theta
+        if self._decomposed:
+            return self._unfold_decomposed()
+        return self._unfold_coupled()
+
     def unfold_polynomial_coefficients(self) -> Tensor:
         """Return polynomial coefficients in monomial basis.
 
@@ -349,14 +386,16 @@ class EnsembleRNNModule(nn.Module):
         Returns:
             theta: (E, n_states, n_terms) — polynomial coefficients in monomial basis
         """
-        if self._direct:
-            return self.theta
-        if self._decomposed:
-            return self._unfold_decomposed()
-        return self._unfold_coupled()
+        if self._compiled_unfold is not None:
+            return self._compiled_unfold()
+        return self._unfold_impl()
 
     def _unfold_coupled(self) -> Tensor:
-        """Unfold coupled (original) polynomial layer."""
+        """Unfold coupled (original) polynomial layer.
+
+        Uses precomputed _unfold_src_{f} / _unfold_tgt_{f} buffers instead of
+        torch.where, making this function compatible with torch.compile.
+        """
         W_list = list(self.projection.weights)  # D x (E, n_states, n_features)
         b_list = list(self.projection.biases)   # D x (E, n_states)
         degree = self.projection.degree
@@ -371,11 +410,9 @@ class EnsembleRNNModule(nn.Module):
         for d in range(1, degree):
             new_coeffs = coeffs * b_list[d].unsqueeze(-1)
 
-            for f in range(self._mult_table.shape[1]):
-                targets = self._mult_table[:, f]
-                valid = targets >= 0
-                src_idx = torch.where(valid)[0]
-                tgt_idx = targets[src_idx]
+            for f in range(self._unfold_n_features):
+                src_idx = getattr(self, f'_unfold_src_{f}')
+                tgt_idx = getattr(self, f'_unfold_tgt_{f}')
 
                 w_f = W_list[d][:, :, f].unsqueeze(-1)
                 new_coeffs[:, :, tgt_idx] = (
@@ -397,10 +434,12 @@ class EnsembleRNNModule(nn.Module):
         - Degree 1: linear weight -> linear_indices slots
         - Degree d>=2: recursive expansion of d bias-free forms -> degree-d slots only
           (bias-free products produce no lower-degree leakage)
+
+        Uses precomputed _unfold_src_{f} / _unfold_tgt_{f} buffers instead of
+        torch.where, making this function compatible with torch.compile.
         """
         proj = self.projection
         n_terms = self._n_library_terms
-        n_features = self._mult_table.shape[1]
         E = proj.linear_weight.shape[0]
         n = proj.linear_weight.shape[1]
         device = proj.linear_weight.device
@@ -426,11 +465,9 @@ class EnsembleRNNModule(nn.Module):
             # Multiply by remaining bias-free forms (bias=0 -> no lower-degree leakage)
             for k in range(1, d):
                 new_d_coeffs = torch.zeros_like(d_coeffs)
-                for f in range(n_features):
-                    targets = self._mult_table[:, f]
-                    valid = targets >= 0
-                    src_idx = torch.where(valid)[0]
-                    tgt_idx = targets[src_idx]
+                for f in range(self._unfold_n_features):
+                    src_idx = getattr(self, f'_unfold_src_{f}')
+                    tgt_idx = getattr(self, f'_unfold_tgt_{f}')
 
                     w_f = W_list[k][:, :, f].unsqueeze(-1)
                     new_d_coeffs[:, :, tgt_idx] = (
@@ -536,8 +573,53 @@ class EnsembleRNNModule(nn.Module):
         discrete = 1.0 + dt * eigs
         return torch.relu(discrete.abs().max() - 1.0)
 
+    def _build_library_index_arrays(self):
+        """Precompute index arrays for vectorized library computation.
+
+        Groups degree-2+ terms by degree. For each group, stores:
+          - term_indices: which library slots to fill
+          - factor_indices: (n_terms_at_degree, degree) feature indices to multiply
+        """
+        for d in range(2, self._degree + 1):
+            term_idx_list = []
+            factor_list = []
+            for t_idx, term in enumerate(self._library_terms):
+                if len(term) == d:
+                    term_idx_list.append(t_idx)
+                    factor_list.append(list(term))
+            if term_idx_list:
+                self.register_buffer(
+                    f'_lib_term_idx_d{d}',
+                    torch.tensor(term_idx_list, dtype=torch.long))
+                self.register_buffer(
+                    f'_lib_factor_idx_d{d}',
+                    torch.tensor(factor_list, dtype=torch.long))
+
+    def _build_unfolding_index_arrays(self):
+        """Precompute src/tgt index pairs per feature for coefficient unfolding.
+
+        For each feature f, extracts the valid entries from mult_table[:, f]
+        (where target >= 0) and stores them as flat buffers. This eliminates
+        the torch.where calls that would otherwise cause graph breaks in
+        torch.compile.
+
+        Registers buffers:
+          _unfold_src_{f}: source term indices (variable length per feature)
+          _unfold_tgt_{f}: target term indices (same length as src)
+          _unfold_n_features: number of features (for iteration bound)
+        """
+        n_features = self._mult_table.shape[1]
+        self._unfold_n_features = n_features
+        for f in range(n_features):
+            targets = self._mult_table[:, f]
+            valid = targets >= 0
+            src_idx = torch.where(valid)[0]
+            tgt_idx = targets[src_idx]
+            self.register_buffer(f'_unfold_src_{f}', src_idx)
+            self.register_buffer(f'_unfold_tgt_{f}', tgt_idx)
+
     def _compute_library(self, features: Tensor) -> Tensor:
-        """Compute monomial library values for all terms.
+        """Compute monomial library values for all terms (vectorized).
 
         Args:
             features: (E, B, n_features)
@@ -551,13 +633,18 @@ class EnsembleRNNModule(nn.Module):
         # Degree-1 terms
         library[:, :, self._linear_indices] = features
 
-        # Degree-2+ terms: explicit products from term tuple definitions
-        for t_idx, term in enumerate(self._library_terms):
-            if len(term) >= 2:
-                val = features[:, :, term[0]]
-                for f_idx in term[1:]:
-                    val = val * features[:, :, f_idx]
-                library[:, :, t_idx] = val
+        # Degree-2+ terms: vectorized gather + product
+        for d in range(2, self._degree + 1):
+            term_idx = getattr(self, f'_lib_term_idx_d{d}', None)
+            if term_idx is None:
+                continue
+            factor_idx = getattr(self, f'_lib_factor_idx_d{d}')
+            # factor_idx: (n_terms_d, d) — feature indices for each term
+            # Gather all factors at once: (E, B, n_terms_d, d)
+            vals = features[:, :, factor_idx]  # advanced indexing -> (E, B, n_terms_d, d)
+            # Product along the degree axis
+            prod = vals.prod(dim=-1)  # (E, B, n_terms_d)
+            library[:, :, term_idx] = prod
 
         return library
 

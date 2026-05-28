@@ -151,6 +151,77 @@ class GRUEncoder(nn.Module):
         return output.reshape(*leading_shape, T, self.latent_dim)
 
 
+class ODEEncoder(nn.Module):
+    """MLP + forced polynomial ODE encoder.
+
+    Per-timestep MLP encodes sensors to control signal u, then a forced
+    polynomial ODE integrates: z[t+1] = z[t] + dt * P(z[t], u[t]).
+
+    Single member (E=1) — ensemble diversity comes from the autonomous
+    dynamics in SparseAutoencoderRNN, not from the encoder.
+
+    Interface matches GRUEncoder: (..., T, input_dim) -> (..., T, latent_dim)
+
+    Args:
+        input_dim: dimension of sparse measurement vector
+        latent_dim: dimension of output latent state (and control signal u)
+        hidden_dims: MLP encoder hidden widths (default: [128, 64])
+        dropout: dropout for MLP encoder
+        polynomial_degree: degree for forced polynomial ODE
+        dt: timestep for forward Euler integration
+        decomposed: use decomposed polynomial layer
+        num_euler_steps: sub-steps per dt interval
+    """
+
+    def __init__(self, input_dim: int, latent_dim: int,
+                 hidden_dims: Optional[List[int]] = None, dropout: float = 0.1,
+                 polynomial_degree: int = 2, dt: float = 1.0,
+                 decomposed: bool = True, num_euler_steps: int = 1):
+        super().__init__()
+        self.mlp = MLPEncoder(input_dim, latent_dim, hidden_dims, dropout)
+        self.latent_dim = latent_dim
+
+        # Forced polynomial RNN with E=1
+        self.ode = PolynomialRNN(
+            n_states=latent_dim,
+            n_controls=latent_dim,  # MLP outputs as controls
+            ensemble_size=1,
+            polynomial_degree=polynomial_degree,
+            dt=dt,
+            state_names=[f'z_{i}' for i in range(latent_dim)],
+            control_names=[f'u_{i}' for i in range(latent_dim)],
+            dropout=0.,
+            feature_dropout=0.,
+            decomposed=decomposed,
+            direct=False,
+            compiled_forward=True,
+            num_euler_steps=num_euler_steps,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: (..., T, input_dim) — sensor window
+        Returns:
+            z: (..., T, latent_dim) — latent state at each timestep
+        """
+        *batch_dims, T, _ = x.shape
+        u = self.mlp(x)  # (..., T, latent_dim)
+        u_flat = u.reshape(-1, T, self.latent_dim)  # (B, T, latent_dim)
+        B = u_flat.shape[0]
+        u_exp = u_flat.unsqueeze(0)  # (1, B, T, latent_dim)
+        z = torch.zeros(1, B, self.latent_dim, device=x.device)
+
+        rnn = self.ode.rnn
+        z_traj = []
+        for t in range(T):
+            z = rnn(z, u_exp[:, :, t, :])
+            z_traj.append(z)
+
+        z_out = torch.stack(z_traj, dim=2)  # (1, B, T, latent_dim)
+        return z_out[0].reshape(*batch_dims, T, self.latent_dim)
+
+
 class MLPDecoder(nn.Module):
     """MLP decoder mapping latent state back to full state.
 
@@ -210,10 +281,13 @@ class SparseAutoencoderRNN(nn.Module):
     The decoder maps back to full state. Teacher forcing: z_t always comes
     from encoding actual sensors, not from the model's own predictions.
 
-    Two encoder types:
+    Three encoder types:
       - 'mlp': Per-timestep MLP, no temporal context
       - 'gru': GRU accumulates temporal context from sensor sequence,
         providing better state estimation from sparse measurements
+      - 'ode': MLP + forced polynomial ODE integrates temporal context via
+        z[t+1] = z[t] + dt * P(z[t], MLP(sensors[t])). Single member (E=1),
+        ensemble diversity from autonomous dynamics only.
 
     The polynomial P operates only on the latent state z (and optional external
     controls u). The forward Euler step h + dt*P(h) ensures the polynomial
@@ -231,7 +305,7 @@ class SparseAutoencoderRNN(nn.Module):
         ensemble_size: number of independent ensemble members
         polynomial_degree: degree for PolynomialRNN
         dt: timestep for forward Euler integration
-        encoder_type: 'mlp' or 'gru'
+        encoder_type: 'mlp', 'gru', or 'ode'
         encoder_hidden_dims: MLP encoder hidden widths ([] for single linear layer)
         encoder_gru_hidden_dim: GRU hidden dimension (default: latent_dim)
         encoder_num_layers: number of GRU layers (default: 2)
@@ -283,6 +357,12 @@ class SparseAutoencoderRNN(nn.Module):
                 num_layers=encoder_num_layers,
                 dropout=encoder_dropout,
             )
+        elif encoder_type == 'ode':
+            self.encoder = ODEEncoder(
+                sparse_dim, latent_dim, encoder_hidden_dims, encoder_dropout,
+                polynomial_degree=polynomial_degree, dt=dt,
+                decomposed=decomposed, num_euler_steps=num_euler_steps,
+            )
         else:
             self.encoder = MLPEncoder(sparse_dim, latent_dim, encoder_hidden_dims, encoder_dropout)
         self.decoder = MLPDecoder(latent_dim, full_dim, decoder_hidden_dims, decoder_dropout)
@@ -318,25 +398,28 @@ class SparseAutoencoderRNN(nn.Module):
     def forward(self, sparse_obs: Tensor, controls: Optional[Tensor] = None):
         """Forward pass: encode sensors -> polynomial dynamics -> decode predictions.
 
-        Teacher-forced: at each timestep, z_t is encoded from actual sensor
-        observations. The polynomial RNN predicts z_{t+1} from z_t, and the
-        decoder maps z_{t+1} to the predicted full state.
-
-        This reuses the existing PolynomialRNN teacher-forced forward pass.
-        The encoder output serves as the "observed state" that gets fed into
-        the polynomial at each step.
+        For GRU/MLP encoders: teacher-forced polynomial dynamics predicts z_{t+1}
+        from encoded z_t. For ODE encoder: the encoder already integrates the
+        forced ODE, so we decode the last latent state directly.
 
         Args:
             sparse_obs: (B, T, sparse_dim) or (E, B, T, sparse_dim) — sparse measurements
             controls: (B, T, n_controls) or (E, B, T, n_controls) or None — external controls
 
         Returns:
-            full_pred: (E, B, T, full_dim) — decoded predicted next states
-            latent_pred: (E, B, T, latent_dim) — predicted next latent states
-            encoded: encoder output (shape matches sparse_obs minus last dim)
+            full_pred: decoded predictions
+            latent_pred: latent states
+            encoded: encoder output
         """
         # Encode sparse observations to latent states
         encoded = self.encoder(sparse_obs)  # (..., T, latent_dim)
+
+        # ODE encoder already integrates temporally — skip teacher-forced dynamics.
+        # Unsqueeze to add E=1 dimension for API consistency.
+        if isinstance(self.encoder, ODEEncoder):
+            z_last = encoded[..., -1, :]  # (..., latent_dim)
+            full_pred = self.decoder(z_last)  # (..., full_dim)
+            return full_pred.unsqueeze(0), z_last.unsqueeze(0), encoded
 
         # Build input for PolynomialRNN: [encoded_z, controls]
         if controls is not None:
@@ -562,7 +645,9 @@ def fit_autoencoder(
             if len(term) >= 2 and len(set(term)) == 1:
                 dynamics.coefficient_masks[:, :, t_idx] = False
 
-    # Separate param groups: dynamics polynomial can use higher lr
+    # Separate param groups: autonomous dynamics polynomial uses higher lr.
+    # Encoder ODE params stay at encoder lr — they're part of the encoding
+    # pipeline and high lr destabilizes the multi-step ODE integration.
     dynamics_lr = dynamics_learning_rate if dynamics_learning_rate is not None else learning_rate
     dynamics_param_ids = set(id(p) for p in dynamics.parameters())
     encdec_params = [p for p in model.parameters() if id(p) not in dynamics_param_ids]
@@ -684,7 +769,7 @@ def fit_autoencoder(
                     sindy_val = s_loss.item()
 
                 if use_l1:
-                    pen = eff_l1 * (theta**2).mean()
+                    pen = eff_l1 * theta.abs().mean()
                     loss2 = loss2 + pen
                     penalty_val = pen.item()
 

@@ -1,18 +1,18 @@
-"""Multi-seed SST benchmark: sindy-rnn vs SINDy-SHRED vs SHRED.
+"""SST benchmark: sindy-rnn-shred (ODE encoder) vs SINDy-SHRED vs SHRED.
 
-Discovers latent governing equations for weekly sea surface temperature data.
-Runs 5 seeds for each of 3 methods with matched sensor locations.
+Uses SparseAutoencoderRNN with encoder_type='ode':
+  Encoder: MLP(sensors[t]) -> u[t], z[t+1] = z[t] + dt * P(z[t], u[t])
+  Autonomous dynamics: dz/dt = P_auto(z) for derivative matching + discovery
+  Decoder: z -> full_state
 
-Evaluation uses two metrics on the SAME held-out test frames:
-  1. Reconstruction: same-timestep encode-decode (sensors_t -> x_t). All 3 methods.
-  2. Forecast: autonomous rollout from z_0 at train boundary. sindy-rnn + sindy-shred only.
+Training via fit_autoencoder():
+  E_id:    decode(z_final) ≈ full_state        # reconstruction
+  E_sindy: P_auto(z) ≈ dz/dt from encoder z    # derivative matching
+  Refit:   freeze encoder, fit clean equations
 
 Data: NOAA Optimum Interpolation SST V2 (1992-2019)
   - 1,400 weekly snapshots, ~44,000 sea grid points
   - 250 random sensors (0.57% spatial coverage)
-
-SINDy-SHRED reference (Gao et al.):
-  3D linear ODE (poly_order=3, cubic terms pruned), reconstruction relative error: 2.01%
 """
 
 import sys
@@ -54,40 +54,42 @@ DATA_PATH = 'data/SST_data.mat'
 # Shared architecture
 NUM_SENSORS = 250
 LATENT_DIM = 3
-POLY_ORDER = 3          # appendix: poly_order=3 for E-SINDy (cubic terms get pruned to linear)
+POLY_ORDER = 3
 DT = 1 / 52             # weekly
 LAGS = 52               # 1 year of sensor history
-GRU_LAYERS = 2
 DECODER_L1 = 350
 DECODER_L2 = 400
-DROPOUT = 0.25
+DROPOUT = 0.1
 
-# SINDy-SHRED (appendix SST settings)
-SHRED_EPOCHS = 1000          # appendix: 1000 training epochs
+# SINDy-SHRED
+SHRED_EPOCHS = 1000
 SHRED_BATCH_SIZE = 128
 SHRED_LR = 1e-3
-SHRED_THRESHOLD = 1.0        # appendix: thresholds from 0.1 to 1.0
+SHRED_THRESHOLD = 1.0
 SHRED_PATIENCE = 5
 SHRED_SINDY_REG = 10.0
 SHRED_THRES_EPOCH = 100
+SHRED_GRU_LAYERS = 2
 
-# sindy-rnn (HPO best: sw1_dlr01_10k → 4.00% recon, 19.6% forecast)
-RNN_ENSEMBLE = 11
-RNN_EPOCHS = 10000
-RNN_SINDY_WARMUP = 0      # exponential ramp duration for E_sindy + L1
-RNN_PRUNING_WARMUP = 0 + RNN_SINDY_WARMUP  # pruning warmup (after ramp completes)
-RNN_REFIT = 10000
-RNN_LR = 1e-2
-RNN_DYNAMICS_LR = 0.05       # higher dynamics lr converges polynomial faster
-RNN_L1 = 0.05                # no L1 during joint training (refit handles sparsity)
-RNN_PRUNE_THRESHOLD = 1      # no pruning during joint training
-RNN_PRUNE_FREQ = 100
-RNN_SINDY_WEIGHT = .0       # strong encoder nudge (scales encoder grad only)
-RNN_STABILITY_WEIGHT = 1     # discrete Euler stability penalty on Jacobian eigenvalues
-RNN_GRU_HIDDEN = None        # match SINDy-SHRED: GRU hidden_size = latent_dim
+# sindy-rnn-shred (ODE encoder via SparseAutoencoderRNN)
+RNN_SHRED_ENSEMBLE = 11
+RNN_SHRED_EPOCHS = 10000
+RNN_SHRED_LR = 1e-3
+RNN_SHRED_DYNAMICS_LR = 5e-2
+RNN_SHRED_BATCH_SIZE = 64
+RNN_SHRED_ENCODER_HIDDEN = [128, 64]
 
-# METHODS = ['sindy-shred', 'shred', 'sindy-rnn']
-METHODS = ['sindy-rnn']
+# Derivative matching (E_sindy) + L1 + pruning
+RNN_SHRED_SINDY_WEIGHT = 1.0      # weight for derivative matching loss
+RNN_SHRED_SINDY_WARMUP = 0      # epochs before E_sindy + L1 activate
+RNN_SHRED_L1 = 1e-3               # L1 on autonomous dynamics coefficients
+RNN_SHRED_PRUNE_THRESHOLD = 0.1   # pruning threshold
+RNN_SHRED_PRUNE_FREQ = 1000        # pruning frequency
+
+# Refit (freeze encoder, fit clean equations)
+RNN_SHRED_REFIT_EPOCHS = 10000
+
+METHODS = ['sindy-rnn-shred']#, 'sindy-shred', 'shred']
 
 
 # ============================================================
@@ -107,11 +109,8 @@ def get_sensor_locs(full_dim, seed):
     return rng.choice(full_dim, size=NUM_SENSORS, replace=False)
 
 
-def prepare_sindy_rnn_data(X_scaled, sensor_locs, lags, train_end):
-    """Create sliding-window data for sindy-rnn (stride=1).
-
-    Each sample is a sensor window of length LAGS with one same-timestep
-    reconstruction target (the full state at the window's last frame).
+def prepare_sliding_windows(X_scaled, sensor_locs, lags, train_end):
+    """Create sliding-window data (stride=1).
 
     Returns:
         sparse_train: (N_train, LAGS, sparse_dim)
@@ -122,13 +121,13 @@ def prepare_sindy_rnn_data(X_scaled, sensor_locs, lags, train_end):
     N = len(X_scaled)
     sparse_all = X_scaled[:, sensor_locs]
 
-    # Training: sliding windows with stride=1
+    # Training windows
     N_train = train_end - lags + 1
     train_starts = range(N_train)
     sparse_train = np.stack([sparse_all[s:s + lags] for s in train_starts])
-    full_target_train = X_scaled[[s + lags - 1 for s in train_starts]]  # same-timestep
+    full_target_train = X_scaled[[s + lags - 1 for s in train_starts]]
 
-    # Test: sliding windows from test region
+    # Test windows
     N_test = N - train_end
     if N_test >= lags:
         test_starts = range(train_end - lags + 1, N - lags + 1)
@@ -154,10 +153,7 @@ def prepare_sindy_rnn_data(X_scaled, sensor_locs, lags, train_end):
 # ============================================================
 
 def evaluate_reconstructions(recons, X_raw, test_frames):
-    """Compute MSE and relative error on test frames (raw space).
-
-    Works for both reconstruction and forecast arrays — handles NaN gracefully.
-    """
+    """Compute MSE and relative error on test frames (raw space)."""
     valid = ~np.isnan(recons[test_frames, 0])
     valid_frames = test_frames[valid]
 
@@ -172,11 +168,7 @@ def evaluate_reconstructions(recons, X_raw, test_frames):
 
 
 def compute_forecast_mse_per_step(forecast, X_raw, train_end):
-    """Compute per-timestep MSE for autonomous forecast.
-
-    Returns (n_forecast,) array where entry k is the MSE at forecast step k
-    (i.e., frame train_end + k). NaN where forecast is unavailable.
-    """
+    """Per-timestep MSE for autonomous forecast."""
     n_frames = X_raw.shape[0]
     n_forecast = n_frames - train_end
     mse_per_step = np.full(n_forecast, np.nan)
@@ -190,14 +182,11 @@ def compute_forecast_mse_per_step(forecast, X_raw, train_end):
 
 
 # ============================================================
-# Metric 1: Reconstruction (same-timestep encode-decode)
+# Reconstruction: same-timestep encode-decode
 # ============================================================
 
 def reconstruct_sindy_shred(shred_obj, n_frames, full_dim):
-    """SINDy-SHRED/SHRED same-timestep reconstruction: sensors_t -> z_t -> x_t.
-
-    Returns (n_frames, full_dim) in raw space. NaN for frames without reconstruction.
-    """
+    """SINDy-SHRED/SHRED reconstruction."""
     shred_obj._shred.eval()
     lags = shred_obj._lags
     recons = np.full((n_frames, full_dim), np.nan)
@@ -216,14 +205,13 @@ def reconstruct_sindy_shred(shred_obj, n_frames, full_dim):
     return recons
 
 
-def reconstruct_sindy_rnn(model, X_scaled, sensor_locs, scaler):
-    """sindy-rnn same-timestep reconstruction: sensors_t -> z_t -> x_t.
+def reconstruct_sindy_rnn_shred(model, X_scaled, sensor_locs, scaler):
+    """sindy-rnn-shred reconstruction: process sliding windows, decode z[-1].
 
-    Uses sliding windows matching training: each frame t is reconstructed from
-    a LAGS-length sensor window ending at t, taking the last GRU output.
-    Frames before LAGS-1 have no reconstruction (NaN) since they lack full context.
+    Each frame t (for t >= LAGS-1) is reconstructed from the window
+    [t-LAGS+1, ..., t] by running the MLP+SINDy-RNN forward and decoding.
 
-    Returns (n_frames, full_dim) in raw space. NaN for frames < LAGS-1.
+    Returns (n_frames, full_dim) in raw space.
     """
     N = X_scaled.shape[0]
     full_dim = X_scaled.shape[1]
@@ -235,18 +223,14 @@ def reconstruct_sindy_rnn(model, X_scaled, sensor_locs, scaler):
         sparse_all = torch.tensor(
             X_scaled[:, sensor_locs], dtype=torch.float32).to(DEVICE)
 
-        # Process as sliding windows to match training
         chunk = 64
         for batch_start in range(LAGS - 1, N, chunk):
             batch_end = min(batch_start + chunk, N)
             windows = torch.stack([sparse_all[t - LAGS + 1:t + 1]
                                    for t in range(batch_start, batch_end)])
-            encoded = model.encoder(windows)  # (chunk, LAGS, latent_dim)
-            z = encoded[:, -1, :]             # last GRU output per window
-            decoded = model.decoder(z)        # (chunk, full_dim)
-            recons_scaled[batch_start:batch_end] = decoded.cpu().numpy()
+            full_pred, z_final, _ = model(windows)  # (E, B, full_dim)
+            recons_scaled[batch_start:batch_end] = full_pred.mean(0).cpu().numpy()
 
-    # Inverse transform only valid rows
     valid = ~np.isnan(recons_scaled[:, 0])
     recons = np.full((N, full_dim), np.nan)
     recons[valid] = scaler.inverse_transform(recons_scaled[valid])
@@ -254,17 +238,11 @@ def reconstruct_sindy_rnn(model, X_scaled, sensor_locs, scaler):
 
 
 # ============================================================
-# Metric 2: Forecast (autonomous rollout from z_0)
+# Forecast: autonomous rollout
 # ============================================================
 
 def forecast_sindy_shred(shred_obj, n_frames, full_dim, train_end):
-    """Autonomous forecast using SINDy-SHRED's post-hoc SINDy model.
-
-    Integrates the discovered ODE z' = f(z) forward from the last training
-    GRU state, then decodes to full state.
-
-    Returns (n_frames, full_dim) in raw space. NaN for training frames.
-    """
+    """Autonomous forecast using SINDy-SHRED's post-hoc SINDy model."""
     n_forecast = n_frames - train_end
     forecast_arr = np.full((n_frames, full_dim), np.nan)
 
@@ -276,7 +254,6 @@ def forecast_sindy_shred(shred_obj, n_frames, full_dim, train_end):
         forecast_raw = shred_obj.forecast(
             n_steps=n_forecast, init_from="train", return_scaled=False)
         n_actual = min(len(forecast_raw), n_forecast)
-        # Check for divergence
         if np.any(np.abs(forecast_raw[:n_actual]) > 1e6) or np.any(np.isnan(forecast_raw[:n_actual])):
             print("  Forecast diverged")
             return forecast_arr
@@ -287,13 +264,11 @@ def forecast_sindy_shred(shred_obj, n_frames, full_dim, train_end):
     return forecast_arr
 
 
-def forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, scaler):
-    """Autonomous forecast using sindy-rnn polynomial dynamics.
+def forecast_sindy_rnn_shred(model, X_scaled, sensor_locs, train_end, scaler):
+    """Autonomous forecast using discovered polynomial dynamics.
 
-    Encodes sensors up to train_end to get z_0, then evolves forward using
-    only the polynomial dynamics P(z) — no sensor input.
-
-    Returns (n_frames, full_dim) in raw space. NaN for training frames.
+    Gets z_0 by encoding the last training window, then evolves forward
+    using autonomous P(z) from the fitted dynamics.
     """
     N = X_scaled.shape[0]
     full_dim = X_scaled.shape[1]
@@ -304,33 +279,28 @@ def forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, scaler):
     forecast_arr = np.full((N, full_dim), np.nan)
 
     with torch.no_grad():
-        # Encode sensor history up to train boundary
-        sparse_train = torch.tensor(
-            X_scaled[:train_end, sensor_locs], dtype=torch.float32).to(DEVICE)
-        encoded = model.encoder(sparse_train.unsqueeze(0))  # (1, train_end, latent_dim)
-        z_0 = encoded[:, -1:, :]  # (1, 1, latent_dim) — last training state
-        z_0 = z_0.expand(E, -1, -1)  # (E, 1, latent_dim)
+        sparse_all = torch.tensor(
+            X_scaled[:, sensor_locs], dtype=torch.float32).to(DEVICE)
 
-        # Autonomous rollout — get latent trajectory first, decode in chunks
-        theta = model.dynamics.rnn.unfold_polynomial_coefficients()
-        h = z_0
-        latent_steps = []
-        for t in range(n_forecast):
-            h = model.dynamics.rnn.forward_polynomial(
-                h, None, mask=model.dynamics.coefficient_masks, theta=theta,
-                integrator='rk4')
-            latent_steps.append(h)
+        # Encode the window ending at train_end-1 (last training frame)
+        window = sparse_all[train_end - LAGS:train_end].unsqueeze(0)  # (1, LAGS, sparse_dim)
+        encoded = model.encoder(window)  # (1, LAGS, latent_dim)
+        z_0 = encoded[:, -1, :]  # (1, latent_dim) — last timestep
+        z_0 = z_0.unsqueeze(0).expand(E, -1, -1)  # (E, 1, latent_dim)
 
-        # Decode in chunks to avoid OOM
-        chunk_size = 10
-        forecast_scaled = []
-        for i in range(0, n_forecast, chunk_size):
-            chunk = torch.stack(latent_steps[i:i + chunk_size], dim=2)  # (E, 1, chunk, latent_dim)
-            decoded = model.decoder(chunk)  # (E, 1, chunk, full_dim)
-            forecast_scaled.append(decoded.mean(0)[0].cpu().numpy())  # (chunk, full_dim)
+        # Autonomous rollout using fitted dynamics
+        full_traj, latent_traj = model.forecast(z_0, n_steps=n_forecast)
 
-        forecast_scaled = np.concatenate(forecast_scaled, axis=0)  # (n_forecast, full_dim)
-        forecast_arr[train_end:train_end + n_forecast] = scaler.inverse_transform(forecast_scaled)
+        # Decode
+        forecast_scaled = full_traj.mean(0)[0].cpu().numpy()  # (n_forecast, full_dim)
+
+        # Check for divergence
+        if np.any(np.abs(forecast_scaled) > 1e6) or np.any(np.isnan(forecast_scaled)):
+            print("  Forecast diverged")
+            return forecast_arr
+
+        forecast_arr[train_end:train_end + n_forecast] = \
+            scaler.inverse_transform(forecast_scaled)
 
     return forecast_arr
 
@@ -339,8 +309,8 @@ def forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, scaler):
 # Latent trajectory extraction
 # ============================================================
 
-def extract_latent_sindy_rnn(model, X_scaled, sensor_locs, train_end):
-    """Extract encoder and autonomous rollout latent trajectories."""
+def extract_latent_sindy_rnn_shred(model, X_scaled, sensor_locs, train_end):
+    """Extract encoder latent trajectory and autonomous rollout."""
     N = X_scaled.shape[0]
     E = model.ensemble_size
     model.eval()
@@ -348,22 +318,37 @@ def extract_latent_sindy_rnn(model, X_scaled, sensor_locs, train_end):
     with torch.no_grad():
         sparse_all = torch.tensor(
             X_scaled[:, sensor_locs], dtype=torch.float32).to(DEVICE)
-        encoded = model.encoder(sparse_all.unsqueeze(0))  # (1, N, latent_dim)
-        z_encoder = encoded[0].cpu().numpy()  # (N, latent_dim)
+
+        # Extract z from all windows (stride=1)
+        z_list = []
+        chunk = 64
+        for batch_start in range(LAGS - 1, N, chunk):
+            batch_end = min(batch_start + chunk, N)
+            windows = torch.stack([sparse_all[t - LAGS + 1:t + 1]
+                                   for t in range(batch_start, batch_end)])
+            encoded = model.encoder(windows)  # (B, LAGS, latent_dim)
+            z_list.append(encoded[:, -1, :].cpu().numpy())
+
+        z_encoder = np.full((N, LATENT_DIM), np.nan)
+        z_cat = np.concatenate(z_list, axis=0)
+        z_encoder[LAGS - 1:] = z_cat
 
         # Autonomous rollout from train boundary
-        z_0 = encoded[:, train_end-1:train_end, :]  # (1, 1, latent_dim)
-        z_0 = z_0.expand(E, -1, -1)
-        theta = model.dynamics.rnn.unfold_polynomial_coefficients()
+        z_0_val = z_encoder[train_end - 1]
+        z_0 = torch.tensor(z_0_val, dtype=torch.float32).to(DEVICE)
+        z_0 = z_0.unsqueeze(0).unsqueeze(0).expand(E, -1, -1)  # (E, 1, latent_dim)
+
+        dynamics = model.dynamics
+        theta = dynamics.rnn.unfold_polynomial_coefficients()
         h = z_0
-        rollout = [h.mean(0)[0].cpu().numpy()]
+        rollout = [z_0_val]
         n_forecast = N - train_end
         for t in range(n_forecast):
-            h = model.dynamics.rnn.forward_polynomial(
-                h, None, mask=model.dynamics.coefficient_masks, theta=theta,
+            h = dynamics.rnn.forward_polynomial(
+                h, None, mask=dynamics.coefficient_masks, theta=theta,
                 integrator='rk4')
             rollout.append(h.mean(0)[0].cpu().numpy())
-        z_rollout = np.array(rollout)  # (n_forecast+1, latent_dim)
+        z_rollout = np.array(rollout)
 
     return {
         'z_encoder': z_encoder,
@@ -385,9 +370,6 @@ def extract_latent_sindy_shred(shred_obj, has_sindy=True):
         if indices is None or len(indices) == 0:
             continue
         z = shred_obj.gru_normalize(data_type=data_type).detach().cpu().numpy()
-        # gru_normalize uses gru_outputs(sindy=True) which creates consecutive
-        # pairs (h_out[:-1], h_out[1:]) and returns the targets h_out[1:],
-        # so z has len(indices)-1 rows: z[i] corresponds to indices[i+1].
         for i in range(len(z)):
             idx = indices[i + 1]
             frame = idx + lags - 1
@@ -416,12 +398,16 @@ def extract_latent_sindy_shred(shred_obj, has_sindy=True):
     }
 
 
-def plot_latent_dynamics(latent_dict, train_end, latent_dim, seed, save_dir, prefix):
-    """Plot latent variable dynamics for each method.
+# ============================================================
+# Plotting
+# ============================================================
 
-    Creates one figure per method with one subplot per latent dimension,
-    showing encoder trajectory (blue) and autonomous rollout (red dashed).
-    """
+SST_GRID_ROWS = 180
+SST_GRID_COLS = 360
+
+
+def plot_latent_dynamics(latent_dict, train_end, latent_dim, seed, save_dir, prefix):
+    """Plot latent variable dynamics for each method."""
     for method, data in latent_dict.items():
         fig, axes = plt.subplots(latent_dim, 1, figsize=(12, 3 * latent_dim),
                                   sharex=True)
@@ -434,17 +420,14 @@ def plot_latent_dynamics(latent_dict, train_end, latent_dim, seed, save_dir, pre
 
         for d in range(latent_dim):
             ax = axes[d]
-
             valid = ~np.isnan(z_enc[:, d])
             frames = np.arange(len(z_enc))
             ax.plot(frames[valid], z_enc[valid, d], 'b-', alpha=0.7,
                     linewidth=1, label='Encoder')
-
             if z_roll is not None and roll_start is not None:
                 roll_frames = np.arange(roll_start, roll_start + len(z_roll))
                 ax.plot(roll_frames, z_roll[:, d], 'r--', alpha=0.7,
                         linewidth=1.5, label='Autonomous rollout')
-
             ax.axvline(x=train_end, color='k', linestyle=':', alpha=0.5,
                        label='Train/Test' if d == 0 else None)
             ax.set_ylabel(f'z{d+1}')
@@ -461,205 +444,19 @@ def plot_latent_dynamics(latent_dict, train_end, latent_dim, seed, save_dir, pre
         print(f"  Saved latent dynamics plot: {path}")
 
 
-# ============================================================
-# Method runners (train + return reconstruction + forecast)
-# ============================================================
-
-def run_sindy_shred(X, sensor_locs, train_length, validate_length,
-                    n_frames, full_dim, seed, sindy_reg=SHRED_SINDY_REG,
-                    save_dir=None):
-    """Train SINDy-SHRED (or plain SHRED) and return reconstruction + forecast."""
-    shred = SINDySHRED(
-        latent_dim=LATENT_DIM, poly_order=POLY_ORDER,
-        hidden_layers=GRU_LAYERS, l1=DECODER_L1, l2=DECODER_L2,
-        dropout=DROPOUT, batch_size=SHRED_BATCH_SIZE,
-        num_epochs=SHRED_EPOCHS, lr=SHRED_LR,
-        threshold=SHRED_THRESHOLD, patience=SHRED_PATIENCE,
-        sindy_regularization=sindy_reg, thres_epoch=SHRED_THRES_EPOCH,
-        verbose=True, device=DEVICE,
-    )
-
-    shred.fit(
-        num_sensors=NUM_SENSORS, dt=DT, x_to_fit=X, lags=LAGS,
-        train_length=train_length, validate_length=validate_length,
-        sensor_locations=sensor_locs, seed=seed,
-    )
-
-    n_params = sum(p.numel() for p in shred._shred.parameters())
-    train_end = train_length + LAGS
-
-    # Post-hoc SINDy: auto-tune STLSQ threshold on GRU latent trajectories
-    n_active = 0
-    equations = "N/A"
-    if sindy_reg > 0:
-        try:
-            best_thresh, tune_results = shred.auto_tune_threshold(
-                metric='bic', verbose=True)
-            sindy_model = shred._model
-            n_active = int(np.sum(np.abs(sindy_model.coefficients()) > 1e-6))
-            lhs = [f"z{i}'" for i in range(LATENT_DIM)]
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                sindy_model.print(lhs=lhs)
-            equations = buf.getvalue().strip()
-            print(f"  Post-hoc SINDy (threshold={best_thresh:.4f}, {n_active} terms):")
-            print(f"  {equations}")
-        except Exception as e:
-            print(f"  Post-hoc SINDy failed: {e}")
-            import traceback; traceback.print_exc()
-            equations = f"Failed: {e}"
-
-    # Metric 1: Reconstruction (same-timestep)
-    recons = reconstruct_sindy_shred(shred, n_frames, full_dim)
-
-    # Metric 2: Forecast (autonomous rollout) — only if we have a SINDy model
-    forecast = np.full((n_frames, full_dim), np.nan)
-    if sindy_reg > 0:
-        forecast = forecast_sindy_shred(shred, n_frames, full_dim, train_end)
-
-    # Extract latent trajectories
-    latent = extract_latent_sindy_shred(shred, has_sindy=(sindy_reg > 0))
-
-    # Save model
-    if save_dir is not None:
-        method_tag = 'shred' if sindy_reg == 0.0 else 'sindy_shred'
-        path = os.path.join(save_dir, f'sst_{method_tag}_seed{seed}.pt')
-        torch.save(shred._shred.state_dict(), path)
-        print(f"  Saved model to {path}")
-
-    # Free GPU
-    shred._shred.cpu()
-    torch.cuda.empty_cache()
-
-    return recons, forecast, {
-        'n_params': n_params,
-        'n_active_terms': n_active,
-        'equations': equations,
-    }, latent
-
-
-def run_sindy_rnn(X, sensor_locs, train_end, full_dim, seed, save_dir=None):
-    """Train sindy-rnn and return reconstruction + forecast (in raw space).
-
-    Creates its own scaler internally — reconstruction and forecast must
-    happen before the model/scaler are freed.
-    """
-    torch.manual_seed(seed)
-
-    # Scale using training data only
-    sc = MinMaxScaler()
-    sc.fit(X[:train_end])
-    X_scaled = sc.transform(X)
-
-    sparse_train, full_target_train, sparse_test, full_target_test = \
-        prepare_sindy_rnn_data(X_scaled, sensor_locs, LAGS, train_end)
-
-    model = SparseAutoencoderRNN(
-        sparse_dim=NUM_SENSORS, full_dim=full_dim, latent_dim=LATENT_DIM,
-        ensemble_size=RNN_ENSEMBLE, polynomial_degree=POLY_ORDER,
-        dt=DT,
-        encoder_type='gru',
-        encoder_gru_hidden_dim=RNN_GRU_HIDDEN,
-        encoder_num_layers=GRU_LAYERS,
-        decoder_hidden_dims=[DECODER_L1, DECODER_L2],
-        encoder_dropout=DROPOUT, decoder_dropout=DROPOUT,
-        dynamics_dropout=DROPOUT,
-        state_names=[f'z{i+1}' for i in range(LATENT_DIM)],
-    ).to(DEVICE)
-
-    fit_autoencoder(
-        model, sparse_train, full_target_train,
-        sparse_obs_test=sparse_test, full_state_target_test=full_target_test,
-        epochs=RNN_EPOCHS, warmup_steps=RNN_PRUNING_WARMUP, batch_size=64,
-        learning_rate=RNN_LR, dynamics_learning_rate=RNN_DYNAMICS_LR,
-        l1=RNN_L1,
-        pruning_threshold=RNN_PRUNE_THRESHOLD, pruning_method='median',
-        pruning_frequency=RNN_PRUNE_FREQ, dt=DT,
-        refit_epochs=RNN_REFIT,
-        sindy_weight=RNN_SINDY_WEIGHT,
-        sindy_warmup_epochs=RNN_SINDY_WARMUP,
-        stability_weight=RNN_STABILITY_WEIGHT,
-        centered_diff=True,
-        verbose=True,
-    )
-
-    active = model.count_active_terms()
-    n_active = sum(active.values())
-    n_params = sum(p.numel() for p in model.parameters())
-
-    try:
-        equations = model.get_continuous_equations()
-    except Exception:
-        equations = "N/A"
-
-    # Metric 1: Reconstruction (same-timestep, no dynamics)
-    recons = reconstruct_sindy_rnn(model, X_scaled, sensor_locs, sc)
-
-    # Metric 2: Forecast (autonomous rollout)
-    forecast = forecast_sindy_rnn(model, X_scaled, sensor_locs, train_end, sc)
-
-    # Extract latent trajectories
-    latent = extract_latent_sindy_rnn(model, X_scaled, sensor_locs, train_end)
-
-    # Save model
-    if save_dir is not None:
-        path = os.path.join(save_dir, f'sst_sindy_rnn_seed{seed}.pt')
-        model.save(path)
-        print(f"  Saved model to {path}")
-
-    # Free GPU
-    model.cpu()
-    torch.cuda.empty_cache()
-
-    return recons, forecast, {
-        'n_params': n_params,
-        'n_active_terms': n_active,
-        'equations': equations,
-    }, latent
-
-
-# ============================================================
-# Image generation
-# ============================================================
-
-SST_GRID_ROWS = 180
-SST_GRID_COLS = 360
-
-
 def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
                         prefix='recon'):
-    """Generate composite images for all methods at a given seed.
-
-    Maps sea grid points back to a (180, 360) global grid for 2D visualization.
-    Plots anomalies from the temporal mean rather than absolute temperatures,
-    since absolute SST is dominated by the static climatological pattern and
-    looks nearly identical across timesteps. Anomalies reveal seasonal cycles,
-    interannual variability (El Nino/La Nina), and whether the model captures
-    temporal evolution.
-
-    Args:
-        X_raw: (n_frames, n_sea_points) ground truth
-        sst_locs: indices of sea grid points in the full (64800,) grid
-        data_dict: dict mapping method_name -> (n_frames, n_sea_points) array
-        train_end: frame index where test region begins
-        seed: seed number (for filename)
-        save_dir: directory to save images
-        prefix: 'recon' for reconstruction, 'forecast' for autonomous rollout
-    """
+    """Generate composite images for all methods."""
     n_frames = X_raw.shape[0]
-    X_mean = np.nanmean(X_raw, axis=0)  # temporal mean per grid point
+    X_mean = np.nanmean(X_raw, axis=0)
 
     def to_grid(vec):
-        """Map sea-point vector to (180, 360) grid with NaN for land."""
         grid = np.full(SST_GRID_ROWS * SST_GRID_COLS, np.nan)
         grid[sst_locs] = vec
         return grid.reshape(SST_GRID_ROWS, SST_GRID_COLS)
 
     for method, data in data_dict.items():
-        # Select frames spanning the full relevant range
         if prefix == 'forecast':
-            # Always span the full test period so seasonal variation is visible,
-            # even if the forecast diverges partway through
             start = train_end
             end = n_frames - 1
         else:
@@ -671,15 +468,11 @@ def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
 
         frame_indices = np.linspace(start, end,
                                     min(8, end - start + 1), dtype=int)
-
         n_cols = len(frame_indices)
         fig, axes = plt.subplots(3, n_cols, figsize=(3 * n_cols, 7))
 
-        # Anomalies from temporal mean
         gt_anom = X_raw[frame_indices] - X_mean[np.newaxis, :]
         pred_anom = data[frame_indices] - X_mean[np.newaxis, :]
-
-        # Symmetric color limits from ground truth anomalies
         vlim = np.nanpercentile(np.abs(gt_anom), 98)
         vmin_val, vmax_val = -vlim, vlim
 
@@ -687,7 +480,6 @@ def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
                       'Recon. anomaly' if prefix == 'recon' else 'Forecast anomaly',
                       '|Error|']
 
-        # Shared error colorbar limit (only from valid predictions)
         err_vals = np.abs(gt_anom - pred_anom)
         valid_err = err_vals[~np.isnan(err_vals)]
         err_max = np.nanpercentile(valid_err, 95) if len(valid_err) > 0 else 1.0
@@ -697,8 +489,6 @@ def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
             has_pred = not np.isnan(data[fidx, 0])
 
             gt_grid = to_grid(gt_anom[j])
-
-            # Row 0: True anomaly (always available)
             axes[0, j].imshow(gt_grid, cmap='RdBu_r', vmin=vmin_val, vmax=vmax_val,
                               aspect='auto', origin='upper')
             axes[0, j].set_title(f"t={fidx} ({region})", fontsize=8)
@@ -711,7 +501,6 @@ def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
                 axes[2, j].imshow(err_grid, cmap='hot', vmin=0, vmax=err_max,
                                   aspect='auto', origin='upper')
             else:
-                # Blank panel for diverged/unavailable forecast
                 for row in [1, 2]:
                     axes[row, j].text(0.5, 0.5, 'N/A', transform=axes[row, j].transAxes,
                                       ha='center', va='center', fontsize=12, color='gray')
@@ -720,7 +509,6 @@ def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
                 axes[row, j].set_xticks([])
                 axes[row, j].set_yticks([])
 
-        # Row labels on leftmost column
         for row, label in enumerate(row_labels):
             axes[row, 0].set_ylabel(label, fontsize=10)
 
@@ -734,14 +522,7 @@ def generate_sst_images(X_raw, sst_locs, data_dict, train_end, seed, save_dir,
 
 
 def plot_forecast_mse_over_time(mse_dict, seed, save_dir, prefix):
-    """Plot per-timestep forecast MSE for all methods on a single figure.
-
-    Args:
-        mse_dict: dict mapping method_name -> (n_forecast,) MSE array
-        seed: seed number (for filename)
-        save_dir: directory to save plot
-        prefix: 'cylinder' or 'sst'
-    """
+    """Plot per-timestep forecast MSE."""
     fig, ax = plt.subplots(figsize=(8, 4))
     has_data = False
 
@@ -770,28 +551,149 @@ def plot_forecast_mse_over_time(mse_dict, seed, save_dir, prefix):
     print(f"  Saved forecast MSE plot: {path}")
 
 
-def select_median_and_cleanup(all_results, save_dir, prefix, methods, num_seeds):
-    """Keep only median-seed images per method, delete the rest."""
-    for method in methods:
-        mses = [(r['seed'], r['recon_mse']) for r in all_results
-                if r['method'] == method and not np.isnan(r['recon_mse'])]
-        if not mses:
-            continue
-        mses.sort(key=lambda x: x[1])
-        median_seed = mses[len(mses) // 2][0]
-        print(f"  {method}: median seed = {median_seed} "
-              f"(recon MSE = {mses[len(mses) // 2][1]:.6f})")
-        for seed in range(num_seeds):
-            if seed != median_seed:
-                for img_prefix in ['recon', 'forecast']:
-                    path = os.path.join(save_dir,
-                        f'{prefix}_{img_prefix}_{method}_seed{seed}.png')
-                    if os.path.exists(path):
-                        os.remove(path)
-                path = os.path.join(save_dir,
-                    f'{prefix}_forecast_mse_seed{seed}.png')
-                if os.path.exists(path):
-                    os.remove(path)
+# ============================================================
+# Method runners
+# ============================================================
+
+def run_sindy_rnn_shred(X, sensor_locs, train_end, full_dim, seed, save_dir=None):
+    """Train sindy-rnn-shred (ODE encoder) and return reconstruction + forecast."""
+    torch.manual_seed(seed)
+
+    sc = MinMaxScaler()
+    sc.fit(X[:train_end])
+    X_scaled = sc.transform(X)
+
+    sparse_train, full_target_train, sparse_test, full_target_test = \
+        prepare_sliding_windows(X_scaled, sensor_locs, LAGS, train_end)
+
+    model = SparseAutoencoderRNN(
+        sparse_dim=NUM_SENSORS,
+        full_dim=full_dim,
+        latent_dim=LATENT_DIM,
+        ensemble_size=RNN_SHRED_ENSEMBLE,
+        polynomial_degree=POLY_ORDER,
+        dt=DT,
+        encoder_type='ode',
+        encoder_hidden_dims=RNN_SHRED_ENCODER_HIDDEN,
+        decoder_hidden_dims=[DECODER_L1, DECODER_L2],
+        encoder_dropout=DROPOUT,
+        decoder_dropout=DROPOUT,
+        state_names=[f'z{i+1}' for i in range(LATENT_DIM)],
+        decomposed=True,
+    ).to(DEVICE)
+
+    fit_autoencoder(
+        model, sparse_train, full_target_train,
+        sparse_obs_test=sparse_test, full_state_target_test=full_target_test,
+        epochs=RNN_SHRED_EPOCHS,
+        batch_size=RNN_SHRED_BATCH_SIZE,
+        learning_rate=RNN_SHRED_LR,
+        dynamics_learning_rate=RNN_SHRED_DYNAMICS_LR,
+        sindy_weight=RNN_SHRED_SINDY_WEIGHT,
+        sindy_warmup_epochs=RNN_SHRED_SINDY_WARMUP,
+        l1=RNN_SHRED_L1,
+        pruning_threshold=RNN_SHRED_PRUNE_THRESHOLD,
+        pruning_frequency=RNN_SHRED_PRUNE_FREQ,
+        pruning_method='median',
+        refit_epochs=RNN_SHRED_REFIT_EPOCHS,
+        dt=DT,
+        centered_diff=True,
+        verbose=True,
+    )
+
+    active = model.count_active_terms()
+    n_active = sum(active.values())
+    n_params = sum(p.numel() for p in model.parameters())
+
+    try:
+        equations = model.get_continuous_equations()
+    except Exception:
+        equations = "N/A"
+
+    # Metric 1: Reconstruction
+    recons = reconstruct_sindy_rnn_shred(model, X_scaled, sensor_locs, sc)
+
+    # Metric 2: Forecast (autonomous rollout)
+    forecast = forecast_sindy_rnn_shred(model, X_scaled, sensor_locs, train_end, sc)
+
+    # Extract latent trajectories
+    latent = extract_latent_sindy_rnn_shred(model, X_scaled, sensor_locs, train_end)
+
+    model.cpu()
+    torch.cuda.empty_cache()
+
+    return recons, forecast, {
+        'n_params': n_params,
+        'n_active_terms': n_active,
+        'equations': equations,
+    }, latent
+
+
+def run_sindy_shred(X, sensor_locs, train_length, validate_length,
+                    n_frames, full_dim, seed, sindy_reg=SHRED_SINDY_REG,
+                    save_dir=None):
+    """Train SINDy-SHRED (or plain SHRED) and return reconstruction + forecast."""
+    shred = SINDySHRED(
+        latent_dim=LATENT_DIM, poly_order=POLY_ORDER,
+        hidden_layers=SHRED_GRU_LAYERS, l1=DECODER_L1, l2=DECODER_L2,
+        dropout=DROPOUT, batch_size=SHRED_BATCH_SIZE,
+        num_epochs=SHRED_EPOCHS, lr=SHRED_LR,
+        threshold=SHRED_THRESHOLD, patience=SHRED_PATIENCE,
+        sindy_regularization=sindy_reg, thres_epoch=SHRED_THRES_EPOCH,
+        verbose=True, device=DEVICE,
+    )
+
+    shred.fit(
+        num_sensors=NUM_SENSORS, dt=DT, x_to_fit=X, lags=LAGS,
+        train_length=train_length, validate_length=validate_length,
+        sensor_locations=sensor_locs, seed=seed,
+    )
+
+    n_params = sum(p.numel() for p in shred._shred.parameters())
+    train_end = train_length + LAGS
+
+    n_active = 0
+    equations = "N/A"
+    if sindy_reg > 0:
+        try:
+            best_thresh, tune_results = shred.auto_tune_threshold(
+                metric='bic', verbose=True)
+            sindy_model = shred._model
+            n_active = int(np.sum(np.abs(sindy_model.coefficients()) > 1e-6))
+            lhs = [f"z{i}'" for i in range(LATENT_DIM)]
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                sindy_model.print(lhs=lhs)
+            equations = buf.getvalue().strip()
+            print(f"  Post-hoc SINDy (threshold={best_thresh:.4f}, {n_active} terms):")
+            print(f"  {equations}")
+        except Exception as e:
+            print(f"  Post-hoc SINDy failed: {e}")
+            import traceback; traceback.print_exc()
+            equations = f"Failed: {e}"
+
+    recons = reconstruct_sindy_shred(shred, n_frames, full_dim)
+
+    forecast = np.full((n_frames, full_dim), np.nan)
+    if sindy_reg > 0:
+        forecast = forecast_sindy_shred(shred, n_frames, full_dim, train_end)
+
+    latent = extract_latent_sindy_shred(shred, has_sindy=(sindy_reg > 0))
+
+    if save_dir is not None:
+        method_tag = 'shred' if sindy_reg == 0.0 else 'sindy_shred'
+        path = os.path.join(save_dir, f'sst_{method_tag}_seed{seed}.pt')
+        torch.save(shred._shred.state_dict(), path)
+        print(f"  Saved model to {path}")
+
+    shred._shred.cpu()
+    torch.cuda.empty_cache()
+
+    return recons, forecast, {
+        'n_params': n_params,
+        'n_active_terms': n_active,
+        'equations': equations,
+    }, latent
 
 
 # ============================================================
@@ -799,12 +701,16 @@ def select_median_and_cleanup(all_results, save_dir, prefix, methods, num_seeds)
 # ============================================================
 
 def main():
-    print("Multi-Seed SST Benchmark")
+    print("SST Benchmark: sindy-rnn-shred vs SINDy-SHRED vs SHRED")
     print("=" * 70)
     print(f"Device: {DEVICE}")
     print(f"Seeds: {NUM_SEEDS}")
     print(f"Methods: {METHODS}")
-    print(f"Architecture: GRU({NUM_SENSORS}->{LATENT_DIM}, {GRU_LAYERS}L) "
+    print(f"Architecture:")
+    print(f"  sindy-rnn-shred: ODEEncoder(MLP({NUM_SENSORS}->{RNN_SHRED_ENCODER_HIDDEN}->{LATENT_DIM})"
+          f"+PolyODE(deg={POLY_ORDER})) + AutonomousDyn(E={RNN_SHRED_ENSEMBLE}) "
+          f"+ Decoder({LATENT_DIM}->{DECODER_L1}->{DECODER_L2}->full)")
+    print(f"  sindy-shred/shred: GRU({NUM_SENSORS}->{LATENT_DIM}, {SHRED_GRU_LAYERS}L) "
           f"+ Decoder({LATENT_DIM}->{DECODER_L1}->{DECODER_L2}->full)")
     print(f"poly_order={POLY_ORDER}, dt={DT:.4f}, lags={LAGS}")
 
@@ -814,16 +720,11 @@ def main():
     n_time, full_dim = X.shape
     print(f"  Shape: ({n_time}, {full_dim})")
 
-    # Train/val split (matching SINDy-SHRED paper)
+    # Train/val split
     train_length = 1000
     validate_length = 30
     train_end = train_length + LAGS
 
-    # Common test frames: after both methods' train+val regions
-    # SINDy-SHRED val ends at frame (train_length + validate_length - 1) + lags - 1
-    # = (1029) + 51 = 1080
-    # sindy-rnn train ends at frame train_end = 1052
-    # Use the later of the two as the start of test frames
     shred_val_end_frame = (train_length + validate_length - 1) + LAGS - 1
     test_start = max(train_end, shred_val_end_frame + 1)
     test_frames = np.arange(test_start, n_time)
@@ -831,7 +732,6 @@ def main():
     print(f"  Train: {train_length} samples, Val: {validate_length} samples")
     print(f"  Test frames: {test_start}-{n_time-1} ({len(test_frames)} frames)")
 
-    # Create directories for saving models and images
     save_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             'results', 'params')
     img_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -854,7 +754,11 @@ def main():
 
             t0 = time.time()
             try:
-                if method == 'sindy-shred':
+                if method == 'sindy-rnn-shred':
+                    recons, forecast, info, latent = run_sindy_rnn_shred(
+                        X, sensor_locs, train_end, full_dim, seed,
+                        save_dir=save_dir)
+                elif method == 'sindy-shred':
                     recons, forecast, info, latent = run_sindy_shred(
                         X, sensor_locs, train_length, validate_length,
                         n_time, full_dim, seed, sindy_reg=SHRED_SINDY_REG,
@@ -864,24 +768,17 @@ def main():
                         X, sensor_locs, train_length, validate_length,
                         n_time, full_dim, seed, sindy_reg=0.0,
                         save_dir=save_dir)
-                elif method == 'sindy-rnn':
-                    recons, forecast, info, latent = run_sindy_rnn(
-                        X, sensor_locs, train_end, full_dim, seed,
-                        save_dir=save_dir)
 
                 elapsed = time.time() - t0
                 seed_recons[method] = recons
                 seed_forecasts[method] = forecast
                 seed_latent[method] = latent
 
-                # Metric 1: Reconstruction
                 recon_mse, recon_rel, n_recon = evaluate_reconstructions(
                     recons, X, test_frames)
-                # Metric 2: Forecast
                 fore_mse, fore_rel, n_fore = evaluate_reconstructions(
                     forecast, X, test_frames)
 
-                # Per-step forecast MSE
                 fore_mse_per_step = None
                 if not np.isnan(fore_mse):
                     fore_mse_per_step = compute_forecast_mse_per_step(
@@ -928,7 +825,7 @@ def main():
                     'equations': 'FAILED',
                 })
 
-        # Generate images for this seed
+        # Generate images
         if seed_recons:
             print(f"\nGenerating images for seed {seed}...")
             generate_sst_images(X, sst_locs, seed_recons, train_end, seed, img_dir,
@@ -936,32 +833,31 @@ def main():
             generate_sst_images(X, sst_locs, seed_forecasts, train_end, seed, img_dir,
                                 prefix='forecast')
 
-            # Forecast MSE over time plot
             seed_fore_mse = {}
             for m in seed_forecasts:
                 r = [x for x in all_results if x['method'] == m and x['seed'] == seed]
                 if r and r[0].get('forecast_mse_per_step') is not None:
                     seed_fore_mse[m] = np.array(r[0]['forecast_mse_per_step'])
             if seed_fore_mse:
-                plot_forecast_mse_over_time(seed_fore_mse, seed, img_dir, 'sst')
+                plot_forecast_mse_over_time(seed_fore_mse, seed, img_dir, 'sst_rnn_shred')
 
-            # Latent dynamics plots
             if seed_latent:
                 plot_latent_dynamics(seed_latent, train_end, LATENT_DIM, seed,
-                                    img_dir, 'sst')
+                                    img_dir, 'sst_rnn_shred')
 
     # Save results
-    with open('sst_benchmark_results.json', 'w') as f:
+    results_path = 'sst_sindy_rnn_shred_results.json'
+    with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=2, default=str)
-    print(f"\nResults saved to sst_benchmark_results.json")
+    print(f"\nResults saved to {results_path}")
 
     # ================================================================
     # Summary
     # ================================================================
     def print_metric_table(metric_key, rel_key, title):
         print(f"\n{title}")
-        print(f"{'Method':<20} {'MSE (mean±std)':<22} {'Rel.Err %':<18} {'Active':<12} {'Time (s)':<10}")
-        print("-" * 82)
+        print(f"{'Method':<25} {'MSE (mean±std)':<22} {'Rel.Err %':<18} {'Active':<12} {'Time (s)':<10}")
+        print("-" * 87)
         for method in METHODS:
             mses = [r[metric_key] for r in all_results
                     if r['method'] == method and not np.isnan(r[metric_key])]
@@ -972,23 +868,23 @@ def main():
 
             if not mses:
                 terms_str = f"{np.mean(terms):.1f}" if terms else "—"
-                print(f"{method:<20} {'N/A (no dynamics)':<22} {'':18} {terms_str:<12}")
+                print(f"{method:<25} {'N/A (no dynamics)':<22} {'':18} {terms_str:<12}")
                 continue
 
             mse_str = f"{np.mean(mses):.6f}±{np.std(mses):.6f}"
             rel_str = f"{100*np.mean(rels):.2f}±{100*np.std(rels):.2f}"
             terms_str = f"{np.mean(terms):.1f}" if terms else "—"
             time_str = f"{np.mean(times):.1f}" if times else "—"
-            print(f"{method:<20} {mse_str:<22} {rel_str:<18} {terms_str:<12} {time_str:<10}")
+            print(f"{method:<25} {mse_str:<22} {rel_str:<18} {terms_str:<12} {time_str:<10}")
 
     print(f"\n\n{'='*70}")
     print("SUMMARY")
     print(f"{'='*70}")
 
     print_metric_table('recon_mse', 'recon_rel_error',
-                       'RECONSTRUCTION (same-timestep encode-decode, all methods)')
+                       'RECONSTRUCTION (same-timestep, all methods)')
     print_metric_table('forecast_mse', 'forecast_rel_error',
-                       '\nFORECAST (autonomous rollout from z_0, dynamics methods only)')
+                       '\nFORECAST (autonomous rollout, dynamics methods only)')
 
     # Per-seed details
     print(f"\nPer-seed test relative error (%):")
@@ -1012,9 +908,9 @@ def main():
                 row += f"  {'N/A':>10} {'N/A':>10}"
         print(row)
 
-    # Print discovered equations
+    # Print autonomous equations
     print(f"\n\n{'='*70}")
-    print("DISCOVERED EQUATIONS")
+    print("DISCOVERED EQUATIONS (autonomous, stage 2)")
     print(f"{'='*70}")
     for r in all_results:
         eq = r.get('equations', 'N/A')
@@ -1022,14 +918,9 @@ def main():
             print(f"\n--- {r['method']}, seed {r['seed']} ---")
             print(eq)
 
-    # Select median seed images, delete the rest
-    if NUM_SEEDS > 1:
-        print(f"\nSelecting median-seed images...")
-        select_median_and_cleanup(all_results, img_dir, 'sst', METHODS, NUM_SEEDS)
-
     print(f"\n\nReference: SINDy-SHRED relative error = 2.01% (Gao et al.)")
     print(f"{'='*70}")
-    print("SST benchmark complete.")
+    print("Benchmark complete.")
 
 
 if __name__ == '__main__':

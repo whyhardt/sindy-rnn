@@ -180,8 +180,8 @@ def fit(
 
             # Coefficient penalty
             if l2 > 0:
-                loss = loss + l2 * theta.abs().mean()
-
+                loss = loss + l2 * (theta * model.coefficient_masks).abs().mean()
+                
             # Discrete Euler stability penalty
             stab_val = 0.
             if stability_weight > 0:

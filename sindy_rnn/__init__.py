@@ -10,14 +10,20 @@ from .polynomial_library import (
 )
 from .equations import get_coefficients, get_equations, get_continuous_equations
 from .pruning import ensemble_prune, threshold_prune, minimum_effect_ci_test
-from .autoencoder import SparseAutoencoderRNN, GRUEncoder, fit_autoencoder
+from .autoencoder import SparseAutoencoderRNN, GRUEncoder, ODEEncoder, fit_autoencoder
+from .sindy_rnn_shred import SINDyRNNSHRED, fit_sindy_rnn_shred, refit_autonomous
+from .rollout import RolloutSINDyRNN, fit_rollout, refit_rollout
 
 __all__ = [
     'PolynomialRNN',
     'fit',
     'SparseAutoencoderRNN',
     'GRUEncoder',
+    'ODEEncoder',
     'fit_autoencoder',
+    'SINDyRNNSHRED',
+    'fit_sindy_rnn_shred',
+    'refit_autonomous',
     'EnsembleRNNModule',
     'EnsemblePolynomialLayer',
     'DecomposedPolynomialLayer',
@@ -31,4 +37,7 @@ __all__ = [
     'ensemble_prune',
     'threshold_prune',
     'minimum_effect_ci_test',
+    'RolloutSINDyRNN',
+    'fit_rollout',
+    'refit_rollout',
 ]
