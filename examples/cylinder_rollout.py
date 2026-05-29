@@ -54,7 +54,7 @@ T_MAX = 60                # max rollout = 2 seconds
 T_START = 1
 DELTA_T = 2
 EPOCHS = 1000
-BATCH_SIZE = 8            # small — full_dim = 400K
+BATCH_SIZE = 16            # small — full_dim = 400K
 BATCHES_PER_EPOCH = 8
 LR = 5e-3
 LAMBDA_0 = 1e-3           # z_0 norm regularization
@@ -367,10 +367,11 @@ def main():
         X_scaled[:train_end, sensor_locs], dtype=torch.float32)
     x_full_train = torch.tensor(
         X_scaled[:train_end], dtype=torch.float32)
+    # Include T_w warmup frames before test so _eval_test can build windows
     x_sparse_test = torch.tensor(
-        X_scaled[train_end:, sensor_locs], dtype=torch.float32)
+        X_scaled[train_end - LAGS:, sensor_locs], dtype=torch.float32)
     x_full_test = torch.tensor(
-        X_scaled[train_end:], dtype=torch.float32)
+        X_scaled[train_end - LAGS:], dtype=torch.float32)
 
     print(f"  Train: {train_end} frames ({train_length} windows)")
     print(f"  Test: {n_time - train_end} frames")
@@ -421,24 +422,9 @@ def main():
         pruning_threshold=PRUNING_THRESHOLD,
         pruning_frequency=PRUNING_FREQUENCY,
         pruning_method='median',
-        cosine_decay=False,
+        lr_patience=100,
         x_sparse_test=x_sparse_test,
         x_full_test=x_full_test,
-        verbose=True,
-    )
-
-    # ── Stage 2: Refit dynamics on frozen encoder latents ──
-    refit_rollout(
-        model,
-        x_sparse_train,
-        T_w=LAGS,
-        refit_epochs=3000,
-        refit_learning_rate=5e-2,
-        refit_l2=5e-2,
-        refit_pruning_threshold=0.1,
-        refit_pruning_frequency=100,
-        refit_pruning_method='median',
-        centered_diff=True,
         verbose=True,
     )
 

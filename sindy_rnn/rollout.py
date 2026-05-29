@@ -67,11 +67,13 @@ class RolloutSINDyRNN(nn.Module):
         dynamics_dropout: float = 0.,
         dynamics_feature_dropout: float = 0.,
         compile_dynamics: bool = False,
+        rollout_noise: float = 0.,
     ):
         super().__init__()
         self.n_sensors = n_sensors
         self.n_latent = n_latent
         self.n_full = n_full
+        self.rollout_noise = rollout_noise
 
         # GRU encoder: sparse sensors -> z_0
         self.encoder = nn.GRU(
@@ -90,8 +92,8 @@ class RolloutSINDyRNN(nn.Module):
             polynomial_degree=polynomial_degree,
             dt=dt,
             state_names=state_names,
-            dropout=dynamics_dropout,
-            feature_dropout=dynamics_feature_dropout,
+            dropout=0.,
+            feature_dropout=0.,
             decomposed=decomposed,
             direct=direct,
             num_euler_steps=num_euler_steps,
@@ -218,6 +220,8 @@ class RolloutSINDyRNN(nn.Module):
         for _ in range(n_steps):
             for _ in range(rnn._num_euler_steps):
                 z = z + dt_sub * rnn._evaluate_rhs_impl(z, None, theta_masked)
+            if self.training and self.rollout_noise > 0:
+                z = z + self.rollout_noise * torch.randn_like(z)
             traj.append(z)
         return torch.stack(traj, dim=2)
 
@@ -276,7 +280,10 @@ class RolloutSINDyRNN(nn.Module):
         dyn = self._eq_dynamics
 
         with torch.no_grad():
-            z = self.encode(x_sparse_warmup)  # (E, B, n_latent) — normalized
+            z = self.encode(x_sparse_warmup)  # (E, B, n_latent) — raw
+
+            # Normalize into the space autonomous_dynamics was trained on
+            z = self._normalize_z(z)
 
             theta = dyn.rnn.unfold_polynomial_coefficients()
             theta_masked = theta * dyn.coefficient_masks.float()
@@ -376,7 +383,10 @@ def fit_rollout(
     pruning_frequency: int = 100,
     pruning_method: str = 'median',
     ensemble_pruning_alpha: float = 0.05,
-    cosine_decay: bool = True,
+    lr_patience: int = 0,
+    lr_factor: float = 0.5,
+    min_lr: float = 1e-6,
+    rollout_noise: float = 0.1,
     x_sparse_test: Optional[Tensor] = None,
     x_full_test: Optional[Tensor] = None,
     verbose: bool = True,
@@ -420,7 +430,9 @@ def fit_rollout(
         pruning_frequency: epochs between pruning (after sparsity activation)
         pruning_method: 'median' or 'ci'
         ensemble_pruning_alpha: confidence level for CI pruning
-        cosine_decay: use cosine annealing LR schedule
+        lr_patience: ReduceLROnPlateau patience (0 = no scheduler)
+        lr_factor: LR reduction factor on plateau
+        min_lr: minimum learning rate
         x_sparse_test: (N_test, n_sensors) — optional test sensor time series
         x_full_test: (N_test, n_full) — optional test full state time series
         verbose: print training progress
@@ -431,6 +443,7 @@ def fit_rollout(
 
     N_time = x_sparse_all.shape[0]
     device = next(model.parameters()).device
+    model.rollout_noise = rollout_noise
 
     # Auto-compute E_step so curriculum finishes in first 50% of epochs
     if E_step is None:
@@ -443,8 +456,10 @@ def fit_rollout(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     scheduler = None
-    if cosine_decay:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
+    if lr_patience > 0:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=lr_factor,
+            patience=lr_patience, min_lr=min_lr)
 
     if verbose:
         print(f"Rollout curriculum training ({epochs} epochs)")
@@ -524,7 +539,7 @@ def fit_rollout(
                 n_batches += 1
 
             if scheduler is not None:
-                scheduler.step()
+                scheduler.step(epoch_rec_loss / max(n_batches, 1))
 
             # Pruning (after curriculum completes)
             if (use_sparsity and pruning_threshold > 0
@@ -553,9 +568,10 @@ def fit_rollout(
                     # Quick check on last batch's z_traj
                     z_norms = z_traj.mean(0).norm(dim=-1).mean().item()
 
+                lr_now = optimizer.param_groups[0]['lr']
                 msg = (f"Epoch {epoch:5d} | T_cur={T_cur:3d} | "
                        f"rec={avg_rec:.6f} | total={avg_tot:.6f} | "
-                       f"|z|={z_norms:.3f}")
+                       f"|z|={z_norms:.3f} | lr={lr_now:.1e}")
 
                 if use_sparsity:
                     active = model.count_active_terms()
