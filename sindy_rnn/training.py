@@ -30,7 +30,6 @@ def fit(
     refit_epochs: int = 0,
     refit_learning_rate: Optional[float] = None,
     dynamics_weight: float = 0.0,
-    stability_weight: float = 0.0,
     centered_diff: bool = True,
     verbose: bool = True,
 ):
@@ -47,7 +46,6 @@ def fit(
     is compared to the true states.
 
     Total loss: E_deriv + dynamics_weight * E_fwd + l2 * |theta|
-                + stability_weight * relu(max|1 + dt*lambda| - 1)
 
     Args:
         model: PolynomialRNN instance
@@ -74,10 +72,6 @@ def fit(
         refit_learning_rate: learning rate for refit phase (default: learning_rate / 5)
         dynamics_weight: weight on autonomous forecast loss relative to
             derivative matching loss. 0.0 = derivative matching only (default).
-        stability_weight: weight on discrete Euler stability penalty.
-            Penalizes max|1 + dt*lambda| - 1 where lambda are eigenvalues of the
-            Jacobian. For degree=1 uses constant Jacobian; for degree>=2 evaluates
-            at subsampled training points. 0.0 = disabled (default).
         centered_diff: if True (default), use centered differences for O(dt²)
             derivative accuracy. Set to False for discrete-time systems (dt~1).
         verbose: print training progress every 50 epochs
@@ -181,20 +175,6 @@ def fit(
             # Coefficient penalty
             if l2 > 0:
                 loss = loss + l2 * (theta * model.coefficient_masks).abs().mean()
-                
-            # Discrete Euler stability penalty
-            stab_val = 0.
-            if stability_weight > 0:
-                if model.rnn._degree > 1:
-                    h_sub = xb[:, :, ::10, :n_states].reshape(E, -1, n_states)
-                    u_sub = (xb[:, :, ::10, n_states:].reshape(E, -1, xb.shape[-1] - n_states)
-                             if xb.shape[-1] > n_states else None)
-                else:
-                    h_sub, u_sub = None, None
-                stab_loss = model.rnn.compute_stability_loss(
-                    theta_masked, model_dt, h_sub, u_sub)
-                loss = loss + stability_weight * stab_loss
-                stab_val = stab_loss.item()
 
             optimizer.zero_grad()
             loss.backward()
@@ -219,8 +199,6 @@ def fit(
                 if dynamics_weight > 0:
                     fwd_val = fwd_loss.item() if isinstance(fwd_loss, torch.Tensor) else fwd_loss
                     msg += f" | fwd {fwd_val:.6f}"
-                if stability_weight > 0:
-                    msg += f" | stab {stab_val:.6f}"
                 msg += f" | active terms: {total_active}"
                 if xs_test is not None and ys_test is not None:
                     with torch.no_grad():
@@ -263,18 +241,6 @@ def fit(
 
                 # Derivative matching (no L1, no autonomous)
                 loss = _derivative_matching_loss(xb, yb, theta_masked)
-
-                # Stability penalty persists through refit
-                if stability_weight > 0:
-                    if model.rnn._degree > 1:
-                        h_sub = xb[:, :, ::10, :n_states].reshape(E, -1, n_states)
-                        u_sub = (xb[:, :, ::10, n_states:].reshape(E, -1, xb.shape[-1] - n_states)
-                                 if xb.shape[-1] > n_states else None)
-                    else:
-                        h_sub, u_sub = None, None
-                    stab_loss = model.rnn.compute_stability_loss(
-                        theta_masked, model_dt, h_sub, u_sub)
-                    loss = loss + stability_weight * stab_loss
 
                 refit_optimizer.zero_grad()
                 loss.backward()

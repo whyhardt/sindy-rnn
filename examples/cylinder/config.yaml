@@ -1,0 +1,46 @@
+# Shared config for cylinder flow: loaded by train_sindy_rnn.py,
+# train_sindy_shred.py, and analyze.py so sensor locations, scaling, and
+# the train/test split are guaranteed identical across methods.
+
+data:
+  path: data/flow_over_cylinder.npy
+  num_sensors: 200
+  sensor_seed: 0
+  latent_dim: 4
+  dt: 0.03333333333333333    # 1/30 (30 FPS)
+  lags: 60                    # T_w = 2 seconds warmup
+  frame_rows: 400
+  frame_cols: 1000
+  test_holdout: 67            # frames held out after the warmup-adjusted train split
+
+sindy_rnn:
+  poly_degree: 3               # cubic dynamics (reference ODE has cubic terms)
+  ensemble_size: 11
+  num_euler_steps: 3
+  gru_layers: 2
+  t_max: 60                    # max rollout length = 2 seconds
+  t_start: 1
+  delta_t: 2
+  epochs: 1000
+  batch_size: 16                # small — full_dim = 400K
+  batches_per_epoch: 8
+  lr: 0.005
+  lambda_0: 0.001               # z_0 norm regularization
+  lambda_s: 0.01                # L1 sparsity on polynomial coefficients
+  grad_clip: 0.5
+  pruning_threshold: 0.1
+  pruning_frequency: 100
+
+sindy_shred:
+  poly_order: 3
+  gru_layers: 2
+  decoder_l1: 350
+  decoder_l2: 400
+  dropout: 0.1
+  epochs: 1000
+  batch_size: 64
+  lr: 0.0005
+  threshold: 0.001
+  patience: 20
+  sindy_reg: 10.0
+  thres_epoch: 300

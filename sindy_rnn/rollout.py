@@ -11,6 +11,13 @@ prevents the optimizer from needing to stabilize long rollouts from scratch.
 
 The decoder is deliberately linear, forcing the latent space to carry
 physical structure rather than letting a nonlinear decoder absorb dynamics.
+
+Identity mode (`identity=True`, requires n_sensors == n_latent == n_full):
+skips the encoder/decoder entirely so z IS the observed state. This applies
+the same rollout curriculum + per-step noise injection to fully-observed
+(e.g. noisy full-state Lorenz) data — trajectory-matching against noisy
+observations is more noise-robust than fit()'s derivative matching, at the
+cost of a harder optimization landscape. See CLAUDE.md for the tradeoff.
 """
 
 from typing import Dict, List, Optional
@@ -48,6 +55,8 @@ class RolloutSINDyRNN(nn.Module):
         direct: use direct polynomial parameterization
         dynamics_dropout: dropout for polynomial layer
         dynamics_feature_dropout: feature dropout for polynomial layer
+        identity: if True, skip the GRU encoder and decoder — z IS the
+            observed state. Requires n_sensors == n_latent == n_full.
     """
 
     def __init__(
@@ -68,15 +77,26 @@ class RolloutSINDyRNN(nn.Module):
         dynamics_feature_dropout: float = 0.,
         compile_dynamics: bool = False,
         rollout_noise: float = 0.,
+        identity: bool = False,
     ):
         super().__init__()
+        if identity and not (n_sensors == n_latent == n_full):
+            raise ValueError(
+                "identity=True requires n_sensors == n_latent == n_full "
+                "(no encoder/decoder means no dimensionality change)")
+
         self.n_sensors = n_sensors
         self.n_latent = n_latent
         self.n_full = n_full
         self.rollout_noise = rollout_noise
+        self.identity = identity
 
-        # GRU encoder: sparse sensors -> z_0
-        self.encoder = nn.GRU(
+        # GRU encoder: sparse sensors -> z_0. Skipped when identity=True —
+        # the observed state IS z, used for fully-observed systems (e.g.
+        # noisy full-state Lorenz) where the rollout curriculum + per-step
+        # noise injection is used for its trajectory-matching noise
+        # robustness, not for sparse-sensor reconstruction.
+        self.encoder = None if identity else nn.GRU(
             n_sensors, n_latent,
             num_layers=gru_layers,
             batch_first=True,
@@ -100,7 +120,8 @@ class RolloutSINDyRNN(nn.Module):
         )
 
         # Linear decoder (deliberately simple — prevents decoder absorbing dynamics)
-        self.decoder = nn.Linear(n_latent, n_full)
+        # Skipped when identity=True — z IS the full state.
+        self.decoder = nn.Identity() if identity else nn.Linear(n_latent, n_full)
         
         # self.decoder = nn.Sequential(
         #     nn.Linear(n_latent, 150),
@@ -173,8 +194,13 @@ class RolloutSINDyRNN(nn.Module):
         Returns:
             z_0: (E, B, n_latent) — standardized
         """
-        _, h_n = self.encoder(x_sparse_warmup)  # (num_layers, B, n_latent)
-        z_raw = h_n[-1]  # (B, n_latent)
+        if self.encoder is None:
+            # identity=True: the observed state IS z. No recurrent context
+            # needed — take the last (possibly noisy) observed frame.
+            z_raw = x_sparse_warmup[:, -1, :]  # (B, n_latent)
+        else:
+            _, h_n = self.encoder(x_sparse_warmup)  # (num_layers, B, n_latent)
+            z_raw = h_n[-1]  # (B, n_latent)
         E = self.ensemble_size
         z_raw = z_raw.unsqueeze(0).expand(E, -1, -1)  # (E, B, n_latent)
 
@@ -332,8 +358,11 @@ class RolloutSINDyRNN(nn.Module):
 
                 if raw:
                     # Bypass normalization — return raw GRU hidden state
-                    _, h_n = self.encoder(windows)
-                    z = h_n[-1]  # (chunk, n_latent)
+                    if self.encoder is None:
+                        z = windows[:, -1, :]  # (chunk, n_latent)
+                    else:
+                        _, h_n = self.encoder(windows)
+                        z = h_n[-1]  # (chunk, n_latent)
                 else:
                     z = self.encode(windows).mean(0)  # (chunk, n_latent)
                 z_list.append(z.cpu())
@@ -361,6 +390,57 @@ class RolloutSINDyRNN(nn.Module):
 
     def print_equations(self):
         self._eq_dynamics.print_equations()
+
+    def save(self, path: str):
+        """Save model weights + constructor config.
+
+        If refit_rollout() has been run, model.autonomous_dynamics (with its
+        own sparsity masks/patience) is saved alongside it — state_dict()
+        captures it automatically since it's a registered submodule.
+        """
+        torch.save({
+            'state_dict': self.state_dict(),
+            'has_autonomous_dynamics': hasattr(self, 'autonomous_dynamics'),
+            'config': {
+                'n_sensors': self.n_sensors,
+                'n_latent': self.n_latent,
+                'n_full': self.n_full,
+                'ensemble_size': self.ensemble_size,
+                'polynomial_degree': self.dynamics.rnn._degree,
+                'dt': self.dynamics.rnn._dt.item(),
+                'num_euler_steps': self.dynamics.rnn._num_euler_steps,
+                'gru_layers': 1 if self.encoder is None else self.encoder.num_layers,
+                'state_names': self.dynamics.state_names,
+                'decomposed': self.dynamics.rnn._decomposed,
+                'direct': self.dynamics.rnn._direct,
+                'rollout_noise': self.rollout_noise,
+                'identity': self.identity,
+            }
+        }, path)
+
+    @classmethod
+    def load(cls, path: str, **kwargs):
+        """Load a saved model. kwargs override saved config."""
+        checkpoint = torch.load(path, weights_only=False)
+        config = {**checkpoint['config'], **kwargs}
+        model = cls(**config)
+
+        if checkpoint['has_autonomous_dynamics']:
+            dynamics = model.dynamics
+            model.autonomous_dynamics = PolynomialRNN(
+                n_states=model.n_latent,
+                n_controls=0,
+                ensemble_size=model.ensemble_size,
+                polynomial_degree=dynamics.rnn._degree,
+                dt=dynamics.rnn._dt.item(),
+                state_names=dynamics.state_names,
+                decomposed=dynamics.rnn._decomposed,
+                direct=dynamics.rnn._direct,
+                num_euler_steps=dynamics.rnn._num_euler_steps,
+            )
+
+        model.load_state_dict(checkpoint['state_dict'], strict=False)
+        return model
 
 
 def fit_rollout(

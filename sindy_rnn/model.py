@@ -214,9 +214,6 @@ class EnsembleRNNModule(nn.Module):
         # Precompute src/tgt index pairs for compile-friendly unfolding
         self._build_unfolding_index_arrays()
 
-        # Precompute derivative lookup tables for Jacobian computation
-        self._build_derivative_table()
-
         # Polynomial parameterization
         if direct:
             # Direct: theta is an nn.Parameter, no projection layer
@@ -483,95 +480,6 @@ class EnsembleRNNModule(nn.Module):
             coeffs = coeffs + d_coeffs
 
         return coeffs
-
-    def _build_derivative_table(self):
-        """Precompute derivative lookup tables for Jacobian computation.
-
-        For each library term j and state k, stores:
-          _deriv_count[j, k]: multiplicity of feature k in term j
-          _deriv_term_idx[j, k]: index of reduced term (term j with one k removed)
-
-        Used by _compute_jacobian() to evaluate dP/dh analytically.
-        """
-        n_terms = self._n_library_terms
-        n_states = self.n_states
-
-        deriv_count = torch.zeros(n_terms, n_states, dtype=torch.long)
-        deriv_term_idx = torch.zeros(n_terms, n_states, dtype=torch.long)
-
-        term_to_idx = {term: idx for idx, term in enumerate(self._library_terms)}
-
-        for j, term in enumerate(self._library_terms):
-            for k in range(n_states):
-                count = term.count(k)
-                if count > 0:
-                    term_list = list(term)
-                    term_list.remove(k)  # remove one instance
-                    reduced = tuple(sorted(term_list))
-                    deriv_count[j, k] = count
-                    deriv_term_idx[j, k] = term_to_idx[reduced]
-
-        self.register_buffer('_deriv_count', deriv_count)
-        self.register_buffer('_deriv_term_idx', deriv_term_idx)
-
-    def _compute_jacobian(self, h, u, theta):
-        """Compute state-dependent Jacobian dP/dh at sample points.
-
-        Args:
-            h: (E, M, n_states) — sample points
-            u: (E, M, n_controls) or None
-            theta: (E, n_states, n_terms) — masked polynomial coefficients
-        Returns:
-            J: (E, M, n_states, n_states) — Jacobian at each point
-        """
-        x = torch.cat([h, u], dim=-1) if u is not None else h
-        library = self._compute_library(x)  # (E, M, n_terms)
-
-        E, M = h.shape[:2]
-        n_states = self.n_states
-
-        J = torch.zeros(E, M, n_states, n_states,
-                        device=h.device, dtype=h.dtype)
-
-        for k in range(n_states):
-            counts = self._deriv_count[:, k].float()       # (n_terms,)
-            term_idx = self._deriv_term_idx[:, k]           # (n_terms,)
-
-            reduced_lib = library[:, :, term_idx]           # (E, M, n_terms)
-            dphi_dk = counts.unsqueeze(0).unsqueeze(0) * reduced_lib  # (E, M, n_terms)
-
-            # J[:, :, i, k] = sum_j theta[:, i, j] * dphi_dk[:, :, j]
-            J[:, :, :, k] = torch.einsum('ent,emt->emn', theta, dphi_dk)
-
-        return J
-
-    def compute_stability_loss(self, theta, dt, h_sample=None, u_sample=None):
-        """Compute discrete Euler stability penalty: relu(max |1 + dt*lambda| - 1).
-
-        For degree=1 (or no h_sample): uses constant Jacobian A = linear coefficients.
-        For degree>=2 with h_sample: evaluates state-dependent Jacobian at sample points.
-
-        Args:
-            theta: (E, n_states, n_terms) — masked polynomial coefficients
-            dt: scalar — integration timestep
-            h_sample: (E, M, n_states) or None — points to evaluate Jacobian at
-            u_sample: (E, M, n_controls) or None
-        Returns:
-            loss: scalar — stability penalty (0 when all eigenvalues inside unit disk)
-        """
-        n_states = self.n_states
-
-        if self._degree == 1 or h_sample is None:
-            # Linear case: J = A (constant), extract from theta
-            lin_idx = self._linear_indices[:n_states]
-            A = theta[:, :, lin_idx]  # (E, n_states, n_states)
-            eigs = torch.linalg.eigvals(A)  # (E, n_states), complex
-        else:
-            J = self._compute_jacobian(h_sample, u_sample, theta)
-            eigs = torch.linalg.eigvals(J)  # (E, M, n_states), complex
-
-        discrete = 1.0 + dt * eigs
-        return torch.relu(discrete.abs().max() - 1.0)
 
     def _build_library_index_arrays(self):
         """Precompute index arrays for vectorized library computation.

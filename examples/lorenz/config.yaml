@@ -1,0 +1,63 @@
+# Shared config for Lorenz: loaded by train_sindy_rnn.py, train_stlsq.py,
+# train_sindy_rnn_rollout.py, and analyze.py so all methods train/evaluate
+# on identical data.
+#
+# This is a single-run demo (one noise level, one seed) matching CLAUDE.md's
+# working configuration. For the full noise/data-size/seed sweep, see
+# lorenz_parameter_recovery.py / lorenz_noise_study.py in this folder.
+
+lorenz:
+  sigma: 10.0
+  rho: 28.0
+  beta: 2.6666666666666665
+  dt: 0.01
+  n_steps: 5000            # training trajectory length
+  forecast_steps: 5000      # autonomous forecast horizon for evaluation
+  noise_frac: 0.05
+  seed: 42
+  noise_seed: 0
+
+sindy_rnn:
+  degree: 2
+  ensemble_size: 11
+  epochs: 2000
+  warmup_steps: 1000
+  window_size: 100
+  learning_rate: 0.05
+  l2: 0.05
+  pruning_frequency: 20
+  pruning_threshold: 0.5
+  ensemble_pruning_alpha: 0.05
+  dropout: 0.1
+  feature_dropout: 0.0
+  refit_epochs: 200
+
+stlsq:
+  threshold: 0.2
+  n_models: 11               # bagging ensemble size (match sindy-rnn E)
+
+# Trajectory-matching alternative to sindy_rnn's derivative matching: same
+# RolloutSINDyRNN curriculum used for cylinder/SST, but with identity=True
+# (no encoder/decoder — z IS the observed noisy state). More noise-robust
+# than derivative matching in principle (integrates out noise over the
+# rollout instead of amplifying it via finite differences), at the cost of
+# a harder optimization landscape. T_max is capped near one Lyapunov time
+# (~110 steps at dt=0.01, since Lorenz's leading Lyapunov exponent is ~0.9)
+# — beyond that, trajectory MSE against one noisy realization stops being a
+# meaningful training signal for a chaotic system.
+sindy_rnn_rollout:
+  degree: 2
+  ensemble_size: 11
+  t_max: 100
+  t_start: 1
+  delta_t: 2
+  epochs: 2000
+  batch_size: 32
+  batches_per_epoch: 8
+  lr: 0.005
+  lambda_0: 0.001
+  lambda_s: 0.05
+  grad_clip: 0.5
+  pruning_threshold: 0.5
+  pruning_frequency: 20
+  rollout_noise: 0.0

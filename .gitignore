@@ -4,3 +4,7 @@ references
 sindy-shred
 sindy_shred
 results
+params
+__pycache__/
+*.pyc
+*.log

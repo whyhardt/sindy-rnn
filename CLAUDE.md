@@ -350,137 +350,132 @@ All three implement `unfold_polynomial_coefficients() → (E, n_states, n_terms)
 
 ---
 
-## 14. SparseAutoencoderRNN
+## 14. Benchmark Study
 
-> See [autoencoder.py](sindy_rnn/autoencoder.py)
+### 14.1 Overview
 
-Encoder-decoder wrapper around `PolynomialRNN` for sparse sensor → latent dynamics → full state reconstruction.
+Each dataset (`lorenz`, `cylinder`, `sst`) lives in its own `examples/<dataset>/` folder with an identical shape:
 
 ```
-z_t = encoder(sparse_obs_t)                         # encode sensors to latent
-z_{t+1} = z_t + dt * P(z_t)                         # forward Euler (autonomous)
-full_pred_{t+1} = decoder(z_{t+1})                   # decode to full state
+examples/<dataset>/
+├── config.yaml           # single source of truth for all tunable values —
+│                          #   both training scripts and analyze.py load this,
+│                          #   so data prep is guaranteed identical across methods
+├── data.py                # data loading/prep functions (take config values as args)
+├── data/                  # raw dataset files (cylinder/sst) or cached generated
+│                          #   data (lorenz) — gitignored
+├── params/                 # trained model checkpoints — gitignored
+├── results/                 # figures + metrics.json from analyze.py — gitignored
+├── train_sindy_rnn.py       # trains sindy-rnn, saves to params/
+├── train_sindy_shred.py     # (cylinder/sst) or train_stlsq.py (lorenz) —
+│                            #   trains the baseline, saves to params/
+└── analyze.py                # loads both from params/, evaluates on the SAME
+                               #   held-out frames, writes figures + metrics.json
+                               #   to results/
 ```
 
-Constructor: `sparse_dim, full_dim, latent_dim, n_controls, ensemble_size, polynomial_degree, dt, encoder_type ('mlp'/'gru'), encoder_hidden_dims, encoder_gru_hidden_dim, encoder_num_layers, decoder_hidden_dims, encoder_dropout, decoder_dropout, dynamics_dropout, dynamics_feature_dropout, state_names, control_names, decomposed, direct`.
+Shared, model-agnostic evaluation/plotting helpers live in `examples/_common/`
+(`eval.py`, `plotting.py`) — used by every `analyze.py`.
 
-**Encoder types:** MLPEncoder (per-timestep) or GRUEncoder (temporal context via Takens' embedding). **MLPDecoder** maps latent → full state. Encoder/decoder shared across ensemble; only inner dynamics has E members.
+**Known asymmetry (all three datasets' baselines except STLSQ):** SINDy-SHRED
+uses its held-out validation split for early-stopping/best-checkpoint
+selection during training; `fit_rollout()` only logs held-out loss without
+acting on it, so sindy-rnn keeps whatever the final training epoch produces.
+Not corrected — treat as a caveat when comparing results.
 
-### fit_autoencoder() training objective
+#### Estimator wrappers (`examples/_common/estimators.py`)
 
-SINDy-SHRED-style sliding windows: each sample is a sensor window of length LAGS
-(stride=1). The GRU encoder produces one latent per window (final hidden state),
-so every latent point has full temporal context. Dynamics pairs come from
-consecutive windows' latent outputs.
+Every train/analyze script goes through a thin, uniform wrapper rather than
+calling `fit()`/`fit_rollout()`/`SINDySHRED`/`pysindy` directly:
 
-Joint loss: `L = E_id + sindy_weight * E_sindy + l1 * |theta|`
+```python
+est.fit(xs, ys)          # trains; saves nothing on its own
+est.predict(xs)           # whatever the model naturally produces when run
+                          #   forward — a next-state, a derivative, or a
+                          #   decoded full state; the wrapper doesn't care which
+est.simulate(x0, n_steps)  # autonomous multi-step rollout from x0
+est.save(path); Cls.load(path)
+```
 
-- **E_id** (reconstruction): `decode(z_i) ≈ full_state_i` — same-timestep reconstruction. Anchors latent space.
-- **E_sindy** (derivative matching): `P(z_i) ≈ dz/dt` — compares polynomial P to empirical derivatives from consecutive windows' latent outputs. Couples encoder to polynomial dynamics.
-- **L1**: sparsity on polynomial coefficients
+Four wrappers, one per method:
+- `PolynomialRNNEstimator` — wraps `PolynomialRNN` + `fit()` (Lorenz derivative matching).
+- `RolloutSINDyRNNEstimator` — wraps `RolloutSINDyRNN` + `fit_rollout()` (cylinder/SST sparse-sensor, or Lorenz `identity=True`).
+- `SindyShredEstimator` — wraps the external `SINDySHRED` reference class.
+- `StlsqEstimator` — wraps pysindy's ensemble STLSQ (E-SINDy); `predict()`/`simulate()` use the coefficient matrix directly (Euler-integration-consistent with the other three) rather than pysindy's own `predict()`/`simulate()`.
 
-**Data format:**
-- `sparse_obs`: `(N, LAGS, sparse_dim)` — N sliding windows with stride=1
-- `full_state_target`: `(N, full_dim)` — same-timestep reconstruction target (one per window)
+**`SindyShredEstimator` gives SINDySHRED real save/load**, which the
+upstream reference class itself doesn't have — its train/val/test split and
+post-hoc SINDy model are normally tied to the live object from `fit()`. The
+estimator drops down one level to two independently well-behaved pieces:
+the raw `SINDy_SHRED_net` (`.net`, stateless at inference — `predict()`
+bypasses SINDySHRED's split-locked `sensor_recon()` and calls the net
+directly on arbitrary windows) and the fitted pysindy model on the latent
+trajectory (`.sindy_model`, plain picklable object). `save()` persists both;
+`load()` reconstructs `predict()`/`simulate()` from them without needing a
+live `SINDySHRED` object at all.
 
-**Staged training**: E_sindy and L1 are gated by `sindy_warmup_epochs`. During `[0, sindy_warmup)`, only E_id trains.
+### 14.2 Lorenz
 
-**Two-phase gradient accumulation**: E_id is computed and backward'd separately (freeing the large decoded tensor) before re-encoding for E_sindy + L1. This prevents OOM on high-dimensional problems.
+Fully observed (no sparse sensors) — two alternative training objectives,
+both on the identical noisy trajectory (config.yaml + data.py):
 
-**Separate param groups**: `dynamics_learning_rate` (default: same as `learning_rate`) controls the polynomial dynamics lr independently. Set higher (e.g. `5e-2`) so ODE coefficients converge faster, while encoder/decoder stay at `1e-3`.
+1. **Derivative matching** (`train_sindy_rnn.py`): direct application of
+   `PolynomialRNN` + `fit()`, matching §10. Compares `P(h)` to empirical
+   `dh/dt` at every point — fast to optimize, but finite-differencing noisy
+   data amplifies the noise (derivative matching is noise-sensitive, same
+   critique classical SINDy gets — see §1).
+2. **Trajectory matching** (`train_sindy_rnn_rollout.py`): `RolloutSINDyRNN`
+   with `identity=True` — the same GRU-encoder/decoder rollout mechanism
+   used for cylinder/SST, but with no encoder/decoder (`z` IS the observed
+   state; requires `n_sensors == n_latent == n_full`). Compares an
+   *integrated* multi-step trajectory to noisy observations instead of a
+   pointwise derivative, which averages out zero-mean noise instead of
+   amplifying it, at the cost of a harder optimization landscape (needs the
+   rollout-length curriculum + per-step noise injection from
+   `fit_rollout()`). Because Lorenz is chaotic (Lyapunov time ≈ 1 unit ≈
+   100 steps at `dt=0.01`), `T_max` is capped near one Lyapunov time in
+   `config.yaml`'s `sindy_rnn_rollout` section — beyond that, trajectory MSE
+   against one noisy realization stops being a meaningful training signal.
 
-**Refit**: After joint training, freezes the encoder, extracts all latent trajectories, resets masks, and calls `fit()` on the PolynomialRNN for clean equation discovery on fixed latent space.
+Baseline for both is STLSQ/E-SINDy (`pysindy`), not SINDy-SHRED, since
+SHRED's sparse-sensor premise doesn't apply to an already fully-observed
+3-state system.
 
-No bootstrap — all ensemble members see the same shared encoder output (diversity from random init + pruning).
+**Scripts:** [examples/lorenz/train_sindy_rnn.py](examples/lorenz/train_sindy_rnn.py), [train_sindy_rnn_rollout.py](examples/lorenz/train_sindy_rnn_rollout.py), [train_stlsq.py](examples/lorenz/train_stlsq.py), [analyze.py](examples/lorenz/analyze.py) (evaluates whichever checkpoints exist in `params/`)
 
-### fit_autoencoder() differences from fit()
+For the full noise/data-size/seed sweep (450 experiments; factored vs direct
+vs STLSQ), see [lorenz_parameter_recovery.py](examples/lorenz/lorenz_parameter_recovery.py)
+and [lorenz_noise_study.py](examples/lorenz/lorenz_noise_study.py) — these
+don't fit the train-once/analyze-once pattern above and are kept as
+standalone sweep scripts in the same folder. **Key finding:** factored
+achieves 100% exact structure match at 5% noise / N>=5000, while both direct
+and STLSQ achieve 0%. (This sweep predates trajectory matching; it has not
+yet been extended to the rollout objective.)
 
-| Aspect | `fit()` | `fit_autoencoder()` |
-|--------|---------|---------------------|
-| L1 param name | `l2` | `l1` |
-| Default pruning | `'ci'` | `'median'` |
-| Default lr | `1e-2` | `1e-3` (encoder/decoder) |
-| Dynamics lr | Same as lr | `dynamics_learning_rate` (separate param group) |
-| Bootstrap | Pre-expands data | **No bootstrap** (shared encoder output) |
-| Test eval | Full-batch | **Per-window loop** (avoids OOM) |
-| Loss | Derivative matching | E_id + E_sindy + L1 (staged via sindy_warmup) |
-| Grad clipping | `max_norm=100.0` | `max_norm=100.0` |
-| Memory | Single backward | **Two-phase** (E_id freed before E_sindy) |
-| Refit | Supported | Freeze encoder → extract z → reset masks → call `fit()` |
+### 14.3 Cylinder Flow
 
----
+**Data:** `examples/cylinder/data/flow_over_cylinder.npy` — 334 frames,
+400×1000 (~1GB). Train/test split and all hyperparameters are in
+[examples/cylinder/config.yaml](examples/cylinder/config.yaml).
 
-## 15. Benchmark Study
+**GPU memory:** SINDy-SHRED decoder ~160M params. Must `.cpu()` and
+`torch.cuda.empty_cache()` between methods if running both in one process.
 
-### 15.1 Overview
+### 14.4 SST
 
-Three experimental settings:
-1. **Lorenz parameter recovery** — factored vs direct vs STLSQ, 6 noise × 5 data sizes × 5 seeds = 450 experiments
-2. **Cylinder flow** — SINDy-RNN-SHRED vs SHRED vs SINDy-SHRED, 400×1000 grayscale from 200 sensors
-3. **SST** — same three methods on NOAA weekly SST from 250 ocean sensors
+**Data:** NOAA OI SST V2 (1992–2019), 1400 weekly snapshots, ~44K sea grid
+points, at `examples/sst/data/SST_data.mat`. Train/test split and all
+hyperparameters are in [examples/sst/config.yaml](examples/sst/config.yaml).
+Test frames start after SINDy-SHRED's own validation buffer
+(`validate_length`) so both methods are scored on an identical,
+non-overlapping held-out region.
 
-### 15.2 Lorenz Parameter Recovery
+### 14.5 Evaluation Protocol
 
-**Script:** [lorenz_parameter_recovery.py](examples/lorenz_parameter_recovery.py)
+All methods evaluated on the same held-out test frames: MSE (unscaled) and
+relative error = ||pred - true||_F / ||true||_F. See `examples/_common/eval.py`.
 
-**Key finding:** Factored achieves 100% exact structure match at 5% noise / N>=5000, while both direct and STLSQ achieve 0%.
-
-### 15.3 Cylinder Flow
-
-**Data:** `data/flow_over_cylinder.npy` — 334 frames, 400×1000 (~1GB). Train 80%, Test 20%.
-
-**Config:**
-| Parameter | SINDy-RNN-SHRED | SINDy-SHRED | SHRED |
-|-----------|-----------------|-------------|-------|
-| Encoder | GRU(200→4), 2 layers | Same | Same |
-| Decoder | MLP(4→350→400→400K) | Same | Same |
-| poly_order/degree | 3 (cubic) | 3 | N/A |
-| Ensemble | E=11, median | E=5 | N/A |
-| epochs | 1000 | 1000 | 1000 |
-| warmup/refit | 200/100 | patience=20 | N/A |
-| lr (enc/dec) | 1e-3 | 5e-4 | 5e-4 |
-| dynamics_lr | 5e-2 | N/A | N/A |
-| batch_size | 64 | 64 | 64 |
-| L1/sindy_reg | 1e-4 | 10.0 | N/A |
-| pruning_threshold | 0.1 | 1e-3 | N/A |
-| dt | 1/30 | N/A | N/A |
-| lags | 60 | 60 | 60 |
-| sindy_weight | 1.0 | N/A | N/A |
-| sindy_warmup | 100 | N/A | N/A |
-
-**GPU memory:** SINDy-SHRED decoder ~160M params. Must `.cpu()` and `torch.cuda.empty_cache()` between methods. Two-phase gradient accumulation in `fit_autoencoder()` prevents OOM by freeing E_id decode tensors before computing E_sindy.
-
-**Script:** [cylinder_benchmark.py](examples/cylinder_benchmark.py)
-
-### 15.4 SST
-
-**Data:** NOAA OI SST V2 (1992–2019), 1400 weekly snapshots, ~44K sea grid points. Train 80%, Test last ~318 frames. 250 random sensors.
-
-**Config:**
-| Parameter | SINDy-RNN-SHRED | SINDy-SHRED | SHRED |
-|-----------|-----------------|-------------|-------|
-| Encoder | GRU(250→3), 2 layers | Same | Same |
-| Decoder | MLP(3→350→400→44,219) | Same | Same |
-| poly_order/degree | 1 (linear) | 3 | N/A |
-| Ensemble | E=11 | E=5 | N/A |
-| epochs | 1000 | 1000 | 1000 |
-| warmup/refit | 200/1000 | patience=5 | N/A |
-| lr (enc/dec) | 1e-3 | 1e-3 | 1e-3 |
-| dynamics_lr | 5e-2 | N/A | N/A |
-| L1/sindy_reg | 1e-3 | 10.0 | N/A |
-| pruning_threshold | 0.1 | 1.0 | N/A |
-| dt | 1/52 | N/A | N/A |
-| lags | 52 | 52 | 52 |
-| sindy_weight | 1.0 | N/A | N/A |
-| sindy_warmup | 100 | N/A | N/A |
-
-**Script:** [sst_benchmark.py](examples/sst_benchmark.py)
-
-### 15.5 Evaluation Protocol
-
-All methods evaluated on same held-out test frames: MSE (unscaled) and relative error = ||pred - true||_F / ||true||_F. Teacher-forced reconstruction for all.
-
-### 15.6 SINDy-SHRED Reference
+### 14.6 SINDy-SHRED Reference
 
 Code in `sindy-shred/` (root level). Key files: `sindy_shred.py`, `sindy_shred_net.py` (E_SINDy, `num_replicates=5` hardcoded), `sindy.py`, `utils.py`.
 
@@ -492,7 +487,7 @@ from sindy_shred import SINDySHRED
 
 ---
 
-## 16. Repository Structure
+## 15. Repository Structure
 
 ```
 sindy-rnn/
@@ -502,25 +497,47 @@ sindy-rnn/
 │   │                                  #   EnsemblePolynomialLayer,
 │   │                                  #   DecomposedPolynomialLayer, EnsembleLinear
 │   ├── training.py                    # fit()
-│   ├── autoencoder.py                 # SparseAutoencoderRNN, fit_autoencoder
+│   ├── rollout.py                     # RolloutSINDyRNN, fit_rollout (current best model)
 │   ├── pruning.py                     # ensemble_prune, median_effect_test, etc.
 │   ├── polynomial_library.py          # build_library_structure, etc.
 │   └── equations.py                   # get_coefficients, get_equations, etc.
 ├── examples/
-│   ├── lorenz_parameter_recovery.py   # Lorenz noise/data grid (450 experiments)
-│   ├── lorenz_noise_study.py          # Single-noise-level Lorenz study
-│   ├── cylinder_benchmark.py          # Cylinder: single seed, 3 methods
-│   ├── cylinder_benchmark_seeds.py    # Cylinder: 5 seeds, 3 methods
-│   ├── sst_benchmark.py              # SST: 5 seeds, 3 methods
-│   └── sanity_check.py               # Quick 1-seed sanity check
+│   ├── _common/                       # shared across every dataset's scripts
+│   │   ├── estimators.py              # fit/predict/simulate/save/load wrappers,
+│   │   │                              #   one per method (see §14.1)
+│   │   ├── eval.py                    # model-agnostic reconstruction/forecast metrics
+│   │   └── plotting.py                # model-agnostic field/latent/MSE plots
+│   ├── lorenz/
+│   │   ├── config.yaml                # all tunable values (data + all methods)
+│   │   ├── data.py                    # generate_lorenz, add_noise, ground truth
+│   │   ├── train_sindy_rnn.py         # PolynomialRNN + fit(), derivative matching
+│   │   ├── train_sindy_rnn_rollout.py # RolloutSINDyRNN(identity=True) + fit_rollout(),
+│   │   │                              #   trajectory matching (noise-robust alternative)
+│   │   ├── train_stlsq.py             # E-SINDy (ensemble STLSQ + bagging), via pysindy
+│   │   ├── analyze.py                 # coefficient recovery + forecast comparison
+│   │   ├── lorenz_parameter_recovery.py  # noise/data-size/seed sweep (450 experiments)
+│   │   ├── lorenz_noise_study.py      # single-noise-level sweep
+│   │   └── lorenz_rollout.py          # sparse-sensor (x,z) RolloutSINDyRNN validation
+│   ├── cylinder/
+│   │   ├── config.yaml
+│   │   ├── data.py
+│   │   ├── train_sindy_rnn.py         # RolloutSINDyRNN + fit_rollout()
+│   │   ├── train_sindy_shred.py       # reference SINDySHRED
+│   │   └── analyze.py
+│   └── sst/
+│       ├── config.yaml
+│       ├── data.py
+│       ├── train_sindy_rnn.py
+│       ├── train_sindy_shred.py
+│       └── analyze.py
 ├── tests/
 │   ├── test_polynomial_layer.py       # forward == forward_polynomial invariant
 │   ├── test_unfolding.py              # Known polynomial recovery
 │   ├── test_pruning.py                # CI test, patience, mask updates
 │   ├── test_training.py               # End-to-end: linear system recovery
-│   └── test_autoencoder.py            # Autoencoder tests
+│   ├── test_rollout.py                # RolloutSINDyRNN identity mode (no encoder/decoder)
+│   └── test_estimators.py             # examples/_common/estimators.py wrappers
 ├── sindy-shred/                       # SINDy-SHRED reference code (external)
-├── data/                              # Dataset files (not in git)
 ├── requirements.txt
 ├── CLAUDE.md                          # This file
 └── README.md

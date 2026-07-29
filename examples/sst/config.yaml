@@ -1,0 +1,45 @@
+# Shared config for SST: loaded by train_sindy_rnn.py, train_sindy_shred.py,
+# and analyze.py so sensor locations, scaling, and the train/test split are
+# guaranteed identical across methods.
+
+data:
+  path: data/SST_data.mat
+  num_sensors: 250
+  sensor_seed: 0
+  latent_dim: 3
+  dt: 0.019230769230769232    # 1/52 (weekly)
+  lags: 52                     # 1 year of sensor history
+  train_length: 1000           # matches SINDy-SHRED paper
+  validate_length: 30          # SINDy-SHRED validation buffer, held out of test too
+
+sindy_rnn:
+  poly_degree: 3
+  ensemble_size: 11
+  num_euler_steps: 3
+  gru_layers: 2
+  t_max: 100                   # max rollout = ~2 years
+  t_start: 1
+  delta_t: 2
+  epochs: 1000
+  batch_size: 16                # smaller than cylinder due to large n_full
+  batches_per_epoch: 8
+  lr: 0.005
+  lambda_0: 0.001
+  lambda_s: 0.001
+  grad_clip: 0.5
+  pruning_threshold: 0.1
+  pruning_frequency: 100
+
+sindy_shred:
+  poly_order: 3
+  gru_layers: 2
+  decoder_l1: 350
+  decoder_l2: 400
+  dropout: 0.25
+  epochs: 1000
+  batch_size: 128
+  lr: 0.001
+  threshold: 1.0
+  patience: 5
+  sindy_reg: 10.0
+  thres_epoch: 100
