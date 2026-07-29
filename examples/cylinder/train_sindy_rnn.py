@@ -80,7 +80,7 @@ def main():
             grad_clip=rcfg['grad_clip'],
             pruning_threshold=rcfg['pruning_threshold'],
             pruning_frequency=rcfg['pruning_frequency'],
-            pruning_method='median',
+            pruning_method='agreement',
             lr_patience=100,
             x_sparse_test=x_sparse_test,
             x_full_test=x_full_test,

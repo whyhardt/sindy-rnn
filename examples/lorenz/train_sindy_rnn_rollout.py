@@ -66,7 +66,7 @@ def main():
             grad_clip=rcfg['grad_clip'],
             pruning_threshold=rcfg['pruning_threshold'],
             pruning_frequency=rcfg['pruning_frequency'],
-            pruning_method='median',
+            pruning_method='agreement',
             rollout_noise=rcfg['rollout_noise'],
             verbose=True,
         ),

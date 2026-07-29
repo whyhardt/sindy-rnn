@@ -1,4 +1,5 @@
-"""Pruning system: ensemble CI test, patience mechanism, and threshold fallback.
+"""Pruning system: ensemble median/agreement tests, patience mechanism, and
+threshold fallback.
 
 Pruning operates on polynomial coefficients (theta), which directly represent
 the ODE right-hand side dh/dt = P(h) in the forward Euler update
@@ -10,44 +11,38 @@ import torch
 from torch import Tensor
 
 
-def minimum_effect_ci_test(
+def agreement_test(
     coefficients: Tensor,
     presence: Tensor,
-    alpha: float = 0.05,
     delta: float = 0.0,
+    agreement_frac: float = 0.5,
 ) -> Tensor:
-    """Minimum-effect confidence interval test for term survival.
+    """Ensemble agreement test for term survival.
 
-    A term survives iff its ensemble mean is statistically distinguishable
-    from zero at level alpha with minimum effect size delta.
-
-    Pruned members (presence=False) contribute zero to the mean, naturally
-    penalising terms that only a few ensemble members identified.
+    Each active member individually "votes" that a term exists iff its own
+    |coefficient| > delta. A term survives iff at least agreement_frac of
+    active members agree it exists. Simpler and cheaper than the mean-based
+    CI test, and — unlike the median test — lets you tune how much of the
+    ensemble must agree rather than requiring the single central value to
+    clear delta.
 
     Args:
         coefficients: (E, n_states, n_terms) — ODE coefficients
         presence: (E, n_states, n_terms) — bool mask (which members have term)
-        alpha: significance level (two-sided)
-        delta: minimum effect size threshold
+        delta: minimum |coefficient| for a member to count as agreeing
+        agreement_frac: fraction of active members that must agree
 
     Returns:
         significant: (n_states, n_terms) bool — True where term survives
     """
-    import scipy.stats
+    votes = (coefficients.abs() > delta) & presence  # (E, n_states, n_terms)
 
-    effective = (coefficients * presence.float()).detach()  # (E, n_states, n_terms)
-    E = effective.shape[0]
+    n_active = presence.float().sum(dim=0)  # (n_states, n_terms)
+    n_agree = votes.float().sum(dim=0)
 
-    mean = effective.mean(dim=0)  # (n_states, n_terms)
-    std = effective.std(dim=0, correction=1)
-    se = std / (E ** 0.5)
-    t_crit = scipy.stats.t.ppf(1 - alpha / 2, df=E - 1)
-
-    ci_lower = mean.abs() - t_crit * se
-    significant = ci_lower > delta
+    significant = n_agree >= agreement_frac * n_active.clamp(min=1)
 
     # Require at least 2 active members
-    n_active = presence.float().sum(dim=0)  # (n_states, n_terms)
     significant = significant & (n_active >= 2)
 
     return significant
@@ -95,29 +90,29 @@ def _get_effective_coefficients_raw(model) -> Tensor:
     return theta
 
 
-def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
-                   method: str = 'ci'):
+def ensemble_prune(model, delta: float,
+                   method: str = 'agreement', agreement_frac: float = 0.5):
     """Run one pruning step using an ensemble statistical test.
 
     Args:
         model: PolynomialRNN instance
-        alpha: significance level for CI test, or unused for median test
         delta: minimum effect size threshold (in ODE units).
             Used directly since theta represents the ODE.
-        dt: physical timestep (unused, kept for API compatibility).
-        method: 'ci' for mean-based confidence interval test,
-                'median' for median test (robust to bifurcation)
+        method: 'median' for median test (robust to bifurcation),
+                'agreement' for ensemble agreement test
+        agreement_frac: fraction of active members that must individually
+            exceed delta for a term to survive. Only used for method='agreement'.
     """
     theta = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
     mask = model.coefficient_masks  # (E, n_states, n_terms)
 
-    if method == 'median':
-        significant = median_effect_test(
-            theta, mask, delta=delta
+    if method == 'agreement':
+        significant = agreement_test(
+            theta, mask, delta=delta, agreement_frac=agreement_frac
         )
     else:
-        significant = minimum_effect_ci_test(
-            theta, mask, alpha=alpha, delta=delta
+        significant = median_effect_test(
+            theta, mask, delta=delta
         )  # (n_states, n_terms)
 
     still_active = mask.any(dim=0)  # (n_states, n_terms)
@@ -137,7 +132,7 @@ def ensemble_prune(model, alpha: float, delta: float, dt: float = None,
     model.pruning_patience = counters
 
 
-def threshold_patience_update(model, threshold: float, dt: float = None):
+def threshold_patience_update(model, threshold: float):
     """Increment patience for terms with |coefficient| < threshold.
 
     Threshold is in ODE units and used directly since theta represents

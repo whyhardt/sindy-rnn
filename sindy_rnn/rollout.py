@@ -461,8 +461,8 @@ def fit_rollout(
     batches_per_epoch: int = 4,
     pruning_threshold: float = 0.1,
     pruning_frequency: int = 100,
-    pruning_method: str = 'median',
-    ensemble_pruning_alpha: float = 0.05,
+    pruning_method: str = 'agreement',
+    agreement_frac: float = 0.5,
     lr_patience: int = 0,
     lr_factor: float = 0.5,
     min_lr: float = 1e-6,
@@ -508,8 +508,9 @@ def fit_rollout(
             heavily redundant; 2-8 batches per epoch is typically sufficient)
         pruning_threshold: pruning threshold delta
         pruning_frequency: epochs between pruning (after sparsity activation)
-        pruning_method: 'median' or 'ci'
-        ensemble_pruning_alpha: confidence level for CI pruning
+        pruning_method: 'median' or 'agreement'
+        agreement_frac: fraction of active ensemble members that must
+            individually exceed pruning_threshold. Only used for method='agreement'.
         lr_patience: ReduceLROnPlateau patience (0 = no scheduler)
         lr_factor: LR reduction factor on plateau
         min_lr: minimum learning rate
@@ -631,7 +632,7 @@ def fit_rollout(
                             ensemble_prune(
                                 model.dynamics, delta=pruning_threshold,
                                 method=pruning_method,
-                                alpha=ensemble_pruning_alpha)
+                                agreement_frac=agreement_frac)
                         else:
                             threshold_patience_update(
                                 model.dynamics,
@@ -719,8 +720,8 @@ def refit_rollout(
     refit_l2: float = 5e-2,
     refit_pruning_threshold: float = 0.1,
     refit_pruning_frequency: int = 100,
-    refit_pruning_method: str = 'median',
-    ensemble_pruning_alpha: float = 0.05,
+    refit_pruning_method: str = 'agreement',
+    agreement_frac: float = 0.5,
     centered_diff: bool = True,
     include_bias: bool = True,
     interaction_only: bool = False,
@@ -743,8 +744,10 @@ def refit_rollout(
         refit_l2: L1 penalty on polynomial coefficients
         refit_pruning_threshold: pruning threshold delta
         refit_pruning_frequency: epochs between pruning
-        refit_pruning_method: 'median' or 'ci'
-        ensemble_pruning_alpha: confidence level for CI pruning
+        refit_pruning_method: 'median' or 'agreement'
+        agreement_frac: fraction of active ensemble members that must
+            individually exceed refit_pruning_threshold. Only used for
+            refit_pruning_method='agreement'.
         centered_diff: use centered differences for derivative estimation
         include_bias: include constant term in library
         interaction_only: exclude pure power terms
@@ -812,8 +815,7 @@ def refit_rollout(
         pruning_threshold=refit_pruning_threshold,
         pruning_method=refit_pruning_method,
         pruning_frequency=refit_pruning_frequency,
-        ensemble_pruning_alpha=ensemble_pruning_alpha,
-        dt=dt,
+        agreement_frac=agreement_frac,
         include_bias=include_bias,
         interaction_only=interaction_only,
         centered_diff=centered_diff,

@@ -22,9 +22,8 @@ def fit(
     l2: float = 1e-4,
     pruning_frequency: int = 1,
     pruning_threshold: Optional[float] = None,
-    ensemble_pruning_alpha: float = 0.05,
-    pruning_method: str = 'ci',
-    dt: Optional[float] = None,
+    agreement_frac: float = 0.5,
+    pruning_method: str = 'agreement',
     include_bias: bool = True,
     interaction_only: bool = False,
     refit_epochs: int = 0,
@@ -59,11 +58,11 @@ def fit(
         l2: coefficient penalty weight on unfolded polynomial coefficients
         pruning_frequency: epochs between pruning events
         pruning_threshold: minimum effect size delta for pruning test.
-        ensemble_pruning_alpha: confidence level alpha for ensemble CI test.
-            For method='median', unused.
-        pruning_method: 'ci' for mean-based CI test,
+        agreement_frac: fraction of active ensemble members that must
+            individually exceed pruning_threshold. Only used for
+            method='agreement'.
+        pruning_method: 'agreement' for ensemble agreement test (default),
             'median' for median test (robust to bifurcation)
-        dt: timestep of the data (unused, kept for API compat).
         include_bias: if False, mask out constant term before training
         interaction_only: if True, mask out pure power terms before training
         refit_epochs: additional epochs with l2=0 and frozen mask after pruning.
@@ -184,12 +183,12 @@ def fit(
             # Pruning
             if epoch >= warmup_steps and epoch % pruning_frequency == 0:
                 with torch.no_grad():
-                    if ensemble_pruning_alpha and E > 1:
-                        ensemble_prune(model, ensemble_pruning_alpha,
-                                       pruning_threshold or 0.0, dt=dt,
-                                       method=pruning_method)
+                    if E > 1:
+                        ensemble_prune(model, pruning_threshold or 0.0,
+                                       method=pruning_method,
+                                       agreement_frac=agreement_frac)
                     elif pruning_threshold and pruning_threshold > 0:
-                        threshold_patience_update(model, pruning_threshold, dt=dt)
+                        threshold_patience_update(model, pruning_threshold)
                         threshold_prune(model, patience_limit=2)
 
             if verbose and (epoch % 50 == 0 or epoch == epochs - 1):

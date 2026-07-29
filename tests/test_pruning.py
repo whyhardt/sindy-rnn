@@ -1,56 +1,61 @@
-"""Test pruning: CI test, patience, mask updates."""
+"""Test pruning: agreement test, median test, patience, mask updates."""
 
 import torch
 import pytest
-from sindy_rnn import PolynomialRNN, minimum_effect_ci_test
+from sindy_rnn import PolynomialRNN, agreement_test
 from sindy_rnn.pruning import ensemble_prune, threshold_patience_update, threshold_prune
 
 
-def test_ci_test_consistent_nonzero_survives():
-    """A term with consistent nonzero mean across ensemble members passes."""
+def test_agreement_test_all_agree_survives():
+    """A term where every active member's |coefficient| exceeds delta survives."""
     E, n_states, n_terms = 10, 2, 5
     coefficients = torch.ones(E, n_states, n_terms) * 2.0
     presence = torch.ones(E, n_states, n_terms, dtype=torch.bool)
 
-    result = minimum_effect_ci_test(coefficients, presence, alpha=0.05, delta=0.0)
+    result = agreement_test(coefficients, presence, delta=0.0, agreement_frac=0.5)
     assert result.all()
 
 
-def test_ci_test_zero_mean_fails():
-    """A term with zero mean fails the CI test."""
+def test_agreement_test_zero_fails():
+    """A term with zero coefficient everywhere fails (no member agrees it exists)."""
     E, n_states, n_terms = 10, 2, 5
     coefficients = torch.zeros(E, n_states, n_terms)
     presence = torch.ones(E, n_states, n_terms, dtype=torch.bool)
 
-    result = minimum_effect_ci_test(coefficients, presence, alpha=0.05, delta=0.0)
+    result = agreement_test(coefficients, presence, delta=0.0, agreement_frac=0.5)
     assert not result.any()
 
 
-def test_ci_test_mixed_sign_fails():
-    """A term with inconsistent sign across members should tend to fail."""
+def test_agreement_test_minority_fails_majority_survives():
+    """Below agreement_frac fraction of agreeing members -> fails; above -> survives."""
     E, n_states, n_terms = 10, 1, 1
-    # Half positive, half negative -> mean near zero
-    coefficients = torch.ones(E, n_states, n_terms)
-    coefficients[:5] = -1.0
     presence = torch.ones(E, n_states, n_terms, dtype=torch.bool)
 
-    result = minimum_effect_ci_test(coefficients, presence, alpha=0.05, delta=0.0)
+    # Only 3 of 10 members have a nonzero coefficient (30% < 50% default)
+    coefficients = torch.zeros(E, n_states, n_terms)
+    coefficients[:3] = 2.0
+    result = agreement_test(coefficients, presence, delta=0.0, agreement_frac=0.5)
     assert not result.any()
 
+    # 6 of 10 members agree (60% >= 50%)
+    coefficients = torch.zeros(E, n_states, n_terms)
+    coefficients[:6] = 2.0
+    result = agreement_test(coefficients, presence, delta=0.0, agreement_frac=0.5)
+    assert result.all()
 
-def test_ci_test_minimum_effect_size():
-    """Terms below the minimum effect size delta should fail."""
+
+def test_agreement_test_minimum_effect_size():
+    """Members must individually clear delta to count as agreeing."""
     E, n_states, n_terms = 10, 1, 1
-    # Small but consistent coefficient
     coefficients = torch.ones(E, n_states, n_terms) * 0.001
     presence = torch.ones(E, n_states, n_terms, dtype=torch.bool)
 
-    # With delta=0, should survive
-    result_no_delta = minimum_effect_ci_test(coefficients, presence, alpha=0.05, delta=0.0)
+    # With delta=0, all members agree -> survives
+    result_no_delta = agreement_test(coefficients, presence, delta=0.0, agreement_frac=0.5)
     assert result_no_delta.all()
 
-    # With delta=0.01, should fail
-    result_with_delta = minimum_effect_ci_test(coefficients, presence, alpha=0.05, delta=0.01)
+    # With delta=0.01, no member's |coef| clears it -> fails
+    result_with_delta = agreement_test(coefficients, presence, delta=0.01, agreement_frac=0.5)
     assert not result_with_delta.any()
 
 
@@ -68,7 +73,7 @@ def test_patience_increments_and_resets():
 
     # Run pruning - some terms might fail
     with torch.no_grad():
-        ensemble_prune(model, alpha=0.05, delta=0.5)
+        ensemble_prune(model, delta=0.5)
 
     # After one step, patience should be 0 or 1 (no prunes yet since max is 1)
     assert (model.pruning_patience <= 1).all()
@@ -85,7 +90,7 @@ def test_pruning_fires_at_patience_2():
         decomposed=False,
     )
 
-    # Make all polynomial weights very small so all terms fail CI test
+    # Make all polynomial weights very small so all terms fail the agreement test
     with torch.no_grad():
         for w in model.rnn.projection.weights:
             w.fill_(0.0)
@@ -98,14 +103,14 @@ def test_pruning_fires_at_patience_2():
     # First pruning step - patience goes to 1
     # delta is in ODE units, used directly (no conversion needed)
     with torch.no_grad():
-        ensemble_prune(model, alpha=0.05, delta=0.01)
+        ensemble_prune(model, delta=0.01)
 
     # Not pruned yet (patience = 1)
     assert model.coefficient_masks.all()
 
     # Second pruning step - patience goes to 2, pruning fires
     with torch.no_grad():
-        ensemble_prune(model, alpha=0.05, delta=0.01)
+        ensemble_prune(model, delta=0.01)
 
     # Zeroed weights give theta=0 everywhere.
     # |0| > 0.01 is false, so all terms fail.
@@ -123,7 +128,7 @@ def test_pruning_fires_at_patience_2_decomposed():
         decomposed=True,
     )
 
-    # Make all polynomial weights very small so all terms fail CI test
+    # Make all polynomial weights very small so all terms fail the agreement test
     proj = model.rnn.projection
     with torch.no_grad():
         proj.constant_bias.fill_(0.0)
@@ -137,11 +142,11 @@ def test_pruning_fires_at_patience_2_decomposed():
 
     # First pruning step - patience goes to 1
     with torch.no_grad():
-        ensemble_prune(model, alpha=0.05, delta=0.01)
+        ensemble_prune(model, delta=0.01)
 
     # Second pruning step - patience goes to 2, pruning fires
     with torch.no_grad():
-        ensemble_prune(model, alpha=0.05, delta=0.01)
+        ensemble_prune(model, delta=0.01)
 
     # Zeroed weights give theta=0 everywhere.
     # ALL terms should be pruned.
@@ -201,9 +206,32 @@ def test_pruning_preserves_significant_terms():
 
     # Run two rounds of pruning
     with torch.no_grad():
-        ensemble_prune(model, alpha=0.05, delta=0.5)
-        ensemble_prune(model, alpha=0.05, delta=0.5)
+        ensemble_prune(model, delta=0.5)
+        ensemble_prune(model, delta=0.5)
 
     # Linear term (self-term) should survive
     self_idx = model.rnn._linear_indices[0].item()
     assert model.coefficient_masks[:, 0, self_idx].all()
+
+
+def test_ensemble_prune_median_method():
+    """method='median' still works as an alternative to the default agreement test."""
+    torch.manual_seed(0)
+
+    model = PolynomialRNN(
+        n_states=1, n_controls=0, ensemble_size=5,
+        polynomial_degree=2, compiled_forward=False,
+        decomposed=False,
+    )
+
+    with torch.no_grad():
+        for w in model.rnn.projection.weights:
+            w.fill_(0.0)
+        for b in model.rnn.projection.biases:
+            b.fill_(0.0)
+
+    with torch.no_grad():
+        ensemble_prune(model, delta=0.01, method='median')
+        ensemble_prune(model, delta=0.01, method='median')
+
+    assert not model.coefficient_masks.any()

@@ -88,7 +88,6 @@ def test_sparsity_on_linear_system():
     fit(model, xs, ys,
         epochs=400,
         warmup_steps=100,
-        ensemble_pruning_alpha=0.05,
         pruning_threshold=0.005,
         learning_rate=1e-2,
         l2=1e-4,

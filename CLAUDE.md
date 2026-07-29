@@ -22,7 +22,7 @@ Given sequential observations of a dynamical system, discover a **sparse polynom
 **Key contributions:**
 1. **Multilinear RNN cell** — product of D linear projections = exact degree-D polynomial
 2. **Analytical coefficient unfolding** — recursive expansion into monomial basis, fully differentiable
-3. **Ensemble pruning** — median/CI test across ensemble members with patience-based stability
+3. **Ensemble pruning** — agreement/median test across ensemble members with patience-based stability
 
 ---
 
@@ -124,15 +124,15 @@ Each ensemble member trains on a different bootstrap resample: `indices = torch.
 
 ### 5.2 Pruning Methods
 
-**Median (recommended):** Term survives iff `|median(coef)| > δ` across active members. Robust to ensemble bifurcation from multicollinearity.
+**Agreement test (default):** Each active member individually votes a term "exists" iff its own `|coef| > δ`. Term survives iff at least `agreement_frac` of active members agree (default 50%). Simple and cheap — no distributional assumptions.
 
-**CI test:** Term survives iff `|mean| - t_{α/2} * SE > δ`. Less robust when bifurcation occurs.
+**Median:** Term survives iff `|median(coef)| > δ` across active members. Robust to ensemble bifurcation from multicollinearity.
 
 Both require at least 2 active members. Theta is already in ODE units — no conversion needed.
 
 ### 5.3 Patience Mechanism
 
-Terms must fail the pruning test **2 consecutive times** before permanent removal. `ensemble_prune()` dispatches to median or CI test, updates patience counters, and permanently masks terms that exceed patience.
+Terms must fail the pruning test **2 consecutive times** before permanent removal. `ensemble_prune()` dispatches to agreement or median test, updates patience counters, and permanently masks terms that exceed patience.
 
 ### 5.4 Threshold Fallback
 
@@ -147,13 +147,13 @@ For E=1, `threshold_patience_update()` increments patience for `|coef| < thresho
 Single-stage training:
 1. **MSE loss** on teacher-forced next-state prediction (NaN-masked for variable-length sequences)
 2. **L1 penalty on unfolded θ** — `l2 * theta.abs().mean()` (not AdamW weight decay). Plain Adam optimizer.
-3. **Periodic pruning** via median/CI test or threshold fallback
+3. **Periodic pruning** via agreement/median test or threshold fallback
 
 **Teacher forcing is essential** — free-running from initial_state causes zero gradients when initial polynomial is near-zero.
 
 **Data format:** `xs: (B, T, n_states + n_controls)`, `ys: (B, T, n_states)`. NaN-pad for variable-length.
 
-**Key params:** `epochs, warmup_steps, learning_rate, l2 (L1 weight), pruning_frequency, pruning_threshold (δ), pruning_method ('median'/'ci'), dt, refit_epochs`.
+**Key params:** `epochs, warmup_steps, learning_rate, l2 (L1 weight), pruning_frequency, pruning_threshold (δ), pruning_method ('agreement'/'median'), agreement_frac, refit_epochs`.
 
 ---
 
@@ -283,13 +283,12 @@ model = PolynomialRNN(
 
 fit(model, xs, ys,
     epochs=3000, warmup_steps=1000,
-    ensemble_pruning_alpha=0.05,
+    agreement_frac=0.5,
     pruning_threshold=0.2,
-    pruning_method='median',
+    pruning_method='agreement',
     pruning_frequency=100,
     learning_rate=5e-2,
     l2=5e-2,              # L1 penalty weight
-    dt=dt,
     refit_epochs=500,
     dynamics_weight=0,    # derivative matching only, no autonomous rollout
     verbose=True,
@@ -309,10 +308,9 @@ model.print_equations()
 ```
 torch >= 2.0
 numpy
-scipy       # for scipy.stats.t.ppf in CI test
 ```
 
-Optional: `matplotlib` for examples.
+Optional: `matplotlib`, `scipy`, `pyyaml`, `scikit-learn`, `pysindy` for examples.
 
 ---
 
@@ -324,7 +322,7 @@ Optional: `matplotlib` for examples.
 1. **Invariant (CRITICAL):** `forward(h, u) == forward_polynomial(h, u, mask=ones)` — rtol=1e-5
 2. **Library structure:** Verify `mult_table` against manual enumeration
 3. **Unfolding correctness:** Known weights → analytically correct coefficients
-4. **CI test / patience / mask updates**
+4. **Agreement/median test / patience / mask updates**
 5. **All-masked identity:** Masking all terms gives `h_i[t+1] = h_i[t]`
 
 ### Integration Tests
@@ -443,14 +441,20 @@ SHRED's sparse-sensor premise doesn't apply to an already fully-observed
 
 **Scripts:** [examples/lorenz/train_sindy_rnn.py](examples/lorenz/train_sindy_rnn.py), [train_sindy_rnn_rollout.py](examples/lorenz/train_sindy_rnn_rollout.py), [train_stlsq.py](examples/lorenz/train_stlsq.py), [analyze.py](examples/lorenz/analyze.py) (evaluates whichever checkpoints exist in `params/`)
 
-For the full noise/data-size/seed sweep (450 experiments; factored vs direct
-vs STLSQ), see [lorenz_parameter_recovery.py](examples/lorenz/lorenz_parameter_recovery.py)
-and [lorenz_noise_study.py](examples/lorenz/lorenz_noise_study.py) — these
-don't fit the train-once/analyze-once pattern above and are kept as
-standalone sweep scripts in the same folder. **Key finding:** factored
-achieves 100% exact structure match at 5% noise / N>=5000, while both direct
-and STLSQ achieve 0%. (This sweep predates trajectory matching; it has not
-yet been extended to the rollout objective.)
+For the full noise/data-size/seed sweep (7 noise levels × 5 data lengths ×
+5 seeds × 3 methods = 525 cells; factored vs direct vs STLSQ), see
+[recovery_run.py](examples/lorenz/recovery_run.py) and
+[recovery_aggregate.py](examples/lorenz/recovery_aggregate.py) — these don't
+fit the train-once/analyze-once pattern above and are kept as standalone
+sweep scripts in the same folder. `recovery_run.py` runs exactly one grid
+cell per invocation and writes its own result JSON to `results/recovery/`
+(the natural unit for a cluster array job — `--grid_index $SLURM_ARRAY_TASK_ID`
+or explicit `--noise_frac/--n_steps/--seed/--method`); `recovery_aggregate.py`
+combines whatever cells have finished (safe to run on a partial sweep) into
+summary tables + plots. **Key finding:** factored achieves 100% exact
+structure match at 5% noise / N>=5000, while both direct and STLSQ achieve
+0%. (This sweep predates trajectory matching; it has not yet been extended
+to the rollout objective.)
 
 ### 14.3 Cylinder Flow
 
@@ -515,9 +519,9 @@ sindy-rnn/
 │   │   │                              #   trajectory matching (noise-robust alternative)
 │   │   ├── train_stlsq.py             # E-SINDy (ensemble STLSQ + bagging), via pysindy
 │   │   ├── analyze.py                 # coefficient recovery + forecast comparison
-│   │   ├── lorenz_parameter_recovery.py  # noise/data-size/seed sweep (450 experiments)
-│   │   ├── lorenz_noise_study.py      # single-noise-level sweep
-│   │   └── lorenz_rollout.py          # sparse-sensor (x,z) RolloutSINDyRNN validation
+│   │   ├── recovery_run.py            # single grid-cell noise/data-size/seed sweep run
+│   │   │                              #   (cluster array job unit) -> results/recovery/
+│   │   └── recovery_aggregate.py      # combines results/recovery/*.json into tables + plots
 │   ├── cylinder/
 │   │   ├── config.yaml
 │   │   ├── data.py
@@ -533,7 +537,7 @@ sindy-rnn/
 ├── tests/
 │   ├── test_polynomial_layer.py       # forward == forward_polynomial invariant
 │   ├── test_unfolding.py              # Known polynomial recovery
-│   ├── test_pruning.py                # CI test, patience, mask updates
+│   ├── test_pruning.py                # Agreement/median test, patience, mask updates
 │   ├── test_training.py               # End-to-end: linear system recovery
 │   ├── test_rollout.py                # RolloutSINDyRNN identity mode (no encoder/decoder)
 │   └── test_estimators.py             # examples/_common/estimators.py wrappers

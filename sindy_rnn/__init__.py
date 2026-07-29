@@ -9,7 +9,7 @@ from .polynomial_library import (
     get_polynomial_degree_from_term,
 )
 from .equations import get_coefficients, get_equations, get_continuous_equations
-from .pruning import ensemble_prune, threshold_prune, minimum_effect_ci_test
+from .pruning import ensemble_prune, threshold_prune, agreement_test
 from .rollout import RolloutSINDyRNN, fit_rollout, refit_rollout
 
 __all__ = [
@@ -27,7 +27,7 @@ __all__ = [
     'get_equations',
     'ensemble_prune',
     'threshold_prune',
-    'minimum_effect_ci_test',
+    'agreement_test',
     'RolloutSINDyRNN',
     'fit_rollout',
     'refit_rollout',

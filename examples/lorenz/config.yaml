@@ -4,7 +4,7 @@
 #
 # This is a single-run demo (one noise level, one seed) matching CLAUDE.md's
 # working configuration. For the full noise/data-size/seed sweep, see
-# lorenz_parameter_recovery.py / lorenz_noise_study.py in this folder.
+# recovery_run.py / recovery_aggregate.py in this folder.
 
 lorenz:
   sigma: 10.0
@@ -27,7 +27,7 @@ sindy_rnn:
   l2: 0.05
   pruning_frequency: 20
   pruning_threshold: 0.5
-  ensemble_pruning_alpha: 0.05
+  agreement_frac: 0.5
   dropout: 0.1
   feature_dropout: 0.0
   refit_epochs: 200
