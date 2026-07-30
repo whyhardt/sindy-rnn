@@ -12,6 +12,12 @@ integrates out zero-mean noise over the rollout instead of amplifying it
 through finite differences (what train_sindy_rnn.py's derivative-matching
 fit() does) — see CLAUDE.md for the tradeoff. Compare against train_sindy_rnn.py
 via analyze.py.
+
+Trains on states normalized by data.compute_scale() (per-state std, no
+mean-centering) — see data.py for why. This also makes lambda_0's z_0-norm
+regularization meaningful again: in raw units z_0 is the literal observed
+physical state (O(10-30)), so penalizing its norm fought the real data;
+normalized, z_0 is O(1) and the regularization does what it's meant to.
 """
 import os
 import sys
@@ -21,8 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import torch
 
+from sindy_rnn.polynomial_library import get_library_feature_names
 from examples._common.estimators import RolloutSINDyRNNEstimator
-from data import load_config, generate_or_load_data, PARAMS_DIR
+from data import load_config, generate_or_load_data, normalize, rescale_coefficients, PARAMS_DIR
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -38,7 +45,9 @@ def main():
     print(f"  noise_frac={lcfg['noise_frac']}, n_steps={lcfg['n_steps']}")
 
     data = generate_or_load_data(cfg)
-    x_noisy = data['noisy_train']
+    scale = data['scale']
+    print(f"  Normalization scale (x,y,z): {scale}")
+    x_noisy = normalize(data['noisy_train'], scale)
 
     torch.manual_seed(lcfg['seed'])
     est = RolloutSINDyRNNEstimator(
@@ -67,7 +76,13 @@ def main():
             pruning_threshold=rcfg['pruning_threshold'],
             pruning_frequency=rcfg['pruning_frequency'],
             pruning_method='agreement',
+            agreement_frac=rcfg['agreement_frac'],
             rollout_noise=rcfg['rollout_noise'],
+            refit_epochs=rcfg['refit_epochs'],
+            refit_learning_rate=rcfg['refit_learning_rate'],
+            lr_patience=rcfg['lr_patience'],
+            lr_factor=rcfg['lr_factor'],
+            min_lr=rcfg['min_lr'],
             verbose=True,
         ),
     )
@@ -79,10 +94,21 @@ def main():
     n_params = sum(p.numel() for p in est.model.parameters())
     print(f"\n  Model: {n_params:,} parameters (dynamics only — identity encoder/decoder)")
 
-    print("\n  Discovered equations:")
+    print("\n  Discovered equations (normalized units, z' = z / scale):")
     est.model.print_equations()
+
+    coefs = est.model.get_coefficients(aggregate=True)
+    coef_matrix = torch.stack([coefs[n] for n in est.model.dynamics.state_names]).cpu().numpy()
+    coef_matrix_raw = rescale_coefficients(coef_matrix, 1 / scale, degree=rcfg['degree'])
+    term_names = get_library_feature_names(est.model.dynamics.state_names, rcfg['degree'])
+    print("\n  Discovered equations (raw physical units):")
+    for i, name in enumerate(est.model.dynamics.state_names):
+        terms = ' + '.join(f"{c:.3f}*{t}" for c, t in zip(coef_matrix_raw[i], term_names)
+                           if abs(c) > 1e-9)
+        print(f"  d{name}/dt = {terms}")
+
     active = est.model.count_active_terms()
-    print(f"  Active terms: {sum(active.values())}")
+    print(f"\n  Active terms: {sum(active.values())}")
     print(f"  Training time: {elapsed:.1f}s")
 
     os.makedirs(PARAMS_DIR, exist_ok=True)

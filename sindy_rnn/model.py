@@ -44,14 +44,12 @@ class EnsemblePolynomialLayer(nn.Module):
     linear forms is an exact degree-D polynomial in x.
     """
 
-    def __init__(self, ensemble_size: int, input_size: int, output_size: int, degree: int = 2, dropout: float = 0.):
+    def __init__(self, ensemble_size: int, input_size: int, output_size: int, degree: int = 2):
         super().__init__()
         self.degree = degree
         self.input_size = input_size
         self.output_size = output_size
 
-        self.dropout = nn.Dropout(dropout)
-        
         self.weights = nn.ParameterList([
             nn.Parameter(torch.empty(ensemble_size, output_size, input_size))
             for _ in range(degree)
@@ -66,13 +64,13 @@ class EnsemblePolynomialLayer(nn.Module):
     def forward(self, x):
         # x: (E, B, n_features) -> output: (E, B, n_states)
         result = (
-            self.dropout(torch.einsum('eni,ebi->ebn', self.weights[0], x)
-            + self.biases[0].unsqueeze(1))
+            torch.einsum('eni,ebi->ebn', self.weights[0], x)
+            + self.biases[0].unsqueeze(1)
         )
         for d in range(1, self.degree):
             factor = (
-                self.dropout(torch.einsum('eni,ebi->ebn', self.weights[d], x)
-                + self.biases[d].unsqueeze(1))
+                torch.einsum('eni,ebi->ebn', self.weights[d], x)
+                + self.biases[d].unsqueeze(1)
             )
             result = result * factor
         if self.degree > 1:
@@ -95,12 +93,11 @@ class DecomposedPolynomialLayer(nn.Module):
     """
 
     def __init__(self, ensemble_size: int, input_size: int, output_size: int,
-                 degree: int = 2, dropout: float = 0.):
+                 degree: int = 2):
         super().__init__()
         self.degree = degree
         self.input_size = input_size
         self.output_size = output_size
-        self.dropout = nn.Dropout(dropout)
 
         # Degree 0: constant
         self.constant_bias = nn.Parameter(torch.zeros(ensemble_size, output_size))
@@ -134,20 +131,14 @@ class DecomposedPolynomialLayer(nn.Module):
         result = self.constant_bias.unsqueeze(1).expand(-1, x.shape[1], -1)
 
         # Degree 1: linear
-        result = result + self.dropout(
-            torch.einsum('eni,ebi->ebn', self.linear_weight, x)
-        )
+        result = result + torch.einsum('eni,ebi->ebn', self.linear_weight, x)
 
         # Degree d>=2: product of d bias-free forms
         for d_str, weights in self.higher_degree_weights.items():
             d = int(d_str)
-            prod = self.dropout(
-                torch.einsum('eni,ebi->ebn', weights[0], x)
-            )
+            prod = torch.einsum('eni,ebi->ebn', weights[0], x)
             for k in range(1, d):
-                factor = self.dropout(
-                    torch.einsum('eni,ebi->ebn', weights[k], x)
-                )
+                factor = torch.einsum('eni,ebi->ebn', weights[k], x)
                 prod = prod * factor
             if d > 1:
                 prod = prod / (d ** 0.5)
@@ -178,8 +169,6 @@ class EnsembleRNNModule(nn.Module):
         n_states: int,
         n_controls: int = 0,
         dt: float = 1.0,
-        dropout: float = 0.,
-        feature_dropout: float = 0.,
         compiled_forward: bool = True,
         polynomial_degree: int = 2,
         decomposed: bool = True,
@@ -228,7 +217,6 @@ class EnsembleRNNModule(nn.Module):
                 input_size=n_features,
                 output_size=n_states,
                 degree=polynomial_degree,
-                dropout=dropout,
             )
         else:
             self.projection = EnsemblePolynomialLayer(
@@ -236,10 +224,7 @@ class EnsembleRNNModule(nn.Module):
                 input_size=n_features,
                 output_size=n_states,
                 degree=polynomial_degree,
-                dropout=dropout,
             )
-
-        self.feature_dropout_p = feature_dropout
 
         self._compiled_forward = None
         self._compiled_unfold = None
@@ -574,8 +559,6 @@ class PolynomialRNN(nn.Module):
         dt: float = 1.0,
         state_names: Optional[List[str]] = None,
         control_names: Optional[List[str]] = None,
-        dropout: float = 0.,
-        feature_dropout: float = 0.,
         compiled_forward: bool = False,
         initial_state: Union[float, Tensor] = 0.,
         decomposed: bool = True,
@@ -593,8 +576,6 @@ class PolynomialRNN(nn.Module):
             n_states=n_states,
             n_controls=n_controls,
             dt=dt,
-            dropout=dropout,
-            feature_dropout=feature_dropout,
             compiled_forward=compiled_forward,
             polynomial_degree=polynomial_degree,
             decomposed=decomposed,

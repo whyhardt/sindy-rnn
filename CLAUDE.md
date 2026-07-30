@@ -44,7 +44,7 @@ where `P: R^{n+m} → R^n` is an exact degree-D polynomial representing `dh/dt =
 
 > See [model.py](sindy_rnn/model.py) — `class PolynomialRNN`
 
-Top-level `nn.Module`. Constructor params: `n_states, n_controls, ensemble_size, polynomial_degree, dt, state_names, control_names, dropout, feature_dropout, compiled_forward, initial_state, decomposed, direct`.
+Top-level `nn.Module`. Constructor params: `n_states, n_controls, ensemble_size, polynomial_degree, dt, state_names, control_names, compiled_forward, initial_state, decomposed, direct`.
 
 Key methods: `forward(x)` (teacher-forced), `get_equations()`, `get_coefficients(aggregate)`, `count_active_terms()`, `save(path)`, `load(path)`.
 
@@ -212,10 +212,9 @@ E=ensemble, B=batch, T=timesteps, n=n_states, m=n_controls, F=n_features=n+m, C=
 13. **Pruning is `torch.no_grad()`**
 14. **Teacher forcing essential** — free-running causes zero gradients
 15. **L1 on unfolded θ, not AdamW** — penalizes polynomial terms, not raw weights
-16. **Dropout per-factor** — inside `EnsemblePolynomialLayer`, not on final output
-17. **Theta caching** — `unfold_polynomial_coefficients()` called once before timestep loop
-18. **Median pruning for bifurcation** — E=10+ can bifurcate due to multicollinearity; median is robust
-19. **Backward compat in load()** — `strict=False`, defaults for missing keys (`dt=1.0`, `decomposed=False`, `direct=False`)
+16. **Theta caching** — `unfold_polynomial_coefficients()` called once before timestep loop
+17. **Median/agreement pruning for bifurcation** — E=10+ can bifurcate due to multicollinearity
+18. **Backward compat in load()** — `strict=False`, defaults for missing keys (`dt=1.0`, `decomposed=False`, `direct=False`)
 
 ### 9.4 Feature Ordering
 
@@ -277,7 +276,7 @@ model = PolynomialRNN(
     n_states=3, n_controls=0, polynomial_degree=2,
     ensemble_size=11, dt=dt,
     state_names=['x', 'y', 'z'],
-    dropout=0.1, decomposed=True,
+    decomposed=True,
     num_euler_steps=3,
 )
 
@@ -415,7 +414,23 @@ live `SINDySHRED` object at all.
 ### 14.2 Lorenz
 
 Fully observed (no sparse sensors) — two alternative training objectives,
-both on the identical noisy trajectory (config.yaml + data.py):
+both on the identical noisy trajectory (config.yaml + data.py).
+
+**All three methods train on states normalized by `data.compute_scale()`**
+(per-state std, computed from the clean reference trajectory) — deliberately
+*scale-only*, no mean-centering. Lorenz's `x, y` are ~zero-mean but `z` has a
+strongly nonzero mean (≈ρ-1, the attractor's center); centering `z` would
+introduce spurious constant/cross terms into the true ODE that don't exist
+in the raw system, corrupting `TRUE_ACTIVE`. Scale-only preserves the exact
+structure — `data.rescale_coefficients(coef_matrix, scale, degree)`
+transforms coefficients between the raw frame and the `z' = z/scale` frame
+(call with `1/scale` to invert) without ever changing which terms are zero.
+`analyze.py` converts every method's coefficients/forecasts back to raw
+units before comparing against `TRUE_COEFS`/`clean_test`. **Caveat:**
+`pruning_threshold`/STLSQ `threshold` are still tuned for the old raw-unit
+coefficient scale — since normalization changes the coefficients' natural
+magnitude, these may need retuning (observed empirically: STLSQ found 16
+spurious terms instead of the true 7 at the pre-normalization threshold).
 
 1. **Derivative matching** (`train_sindy_rnn.py`): direct application of
    `PolynomialRNN` + `fit()`, matching §10. Compares `P(h)` to empirical
@@ -433,7 +448,34 @@ both on the identical noisy trajectory (config.yaml + data.py):
    `fit_rollout()`). Because Lorenz is chaotic (Lyapunov time ≈ 1 unit ≈
    100 steps at `dt=0.01`), `T_max` is capped near one Lyapunov time in
    `config.yaml`'s `sindy_rnn_rollout` section — beyond that, trajectory MSE
-   against one noisy realization stops being a meaningful training signal.
+   against one noisy realization stops being a meaningful training signal
+   (any residual model/noise error amplifies exponentially over the
+   rollout, so loss climbing as `T_cur` grows is expected, not necessarily
+   a sign the fit is failing).
+
+**`fit_rollout()` resilience/debiasing (apply everywhere it's used — cylinder,
+SST, and Lorenz identity mode):**
+- **Non-finite loss guard:** a long autonomous rollout can transiently blow
+  up (especially early in the curriculum, before the polynomial has learned
+  anything, on chaotic-adjacent systems). `fit_rollout()` now checks
+  `torch.isfinite(loss)` before `backward()`/`step()` and skips the update
+  on failure instead of applying `nan`/`inf` gradients, which would
+  otherwise permanently corrupt every weight for the rest of training
+  (mirrors `sindy_shred_net.py`'s own "Non-finite loss encountered;
+  skipping optimization step" safeguard).
+- **`refit_epochs`/`refit_learning_rate`:** once pruning finds the sparse
+  structure, `lambda_s` continuing to apply for the rest of training keeps
+  shrinking/biasing the surviving coefficients (same penalty-shrinkage
+  problem `fit()`'s own `refit_epochs` exists to fix). `fit_rollout()` now
+  supports the same pattern: additional epochs at the final `T_cur` with
+  `lambda_s=0`, the mask frozen, and — unlike `fit()`, which has nothing to
+  freeze — **the encoder and decoder frozen too**, so the dynamics aren't
+  debiasing against a shifting `z`. This is a different refit than
+  `refit_rollout()` (Stage 2, below): it keeps the same trajectory-matching
+  objective, where `refit_rollout()` switches to derivative matching on the
+  extracted latent trajectory — which would undo the noise-robustness
+  benefit of trajectory matching in identity mode, since `z` there is the
+  raw noisy observed state.
 
 Baseline for both is STLSQ/E-SINDy (`pysindy`), not SINDy-SHRED, since
 SHRED's sparse-sensor premise doesn't apply to an already fully-observed

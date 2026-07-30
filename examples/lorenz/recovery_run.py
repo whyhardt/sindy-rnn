@@ -74,8 +74,8 @@ def run_sindy_rnn(trajectory_noisy, direct, seed):
         model_kwargs=dict(
             n_states=3, n_controls=0, polynomial_degree=RNN_CONFIG['degree'],
             ensemble_size=RNN_CONFIG['ensemble_size'], dt=DT,
-            state_names=['x', 'y', 'z'], dropout=RNN_CONFIG['dropout'],
-            feature_dropout=RNN_CONFIG['feature_dropout'], compiled_forward=False,
+            state_names=['x', 'y', 'z'],
+            compiled_forward=False,
             direct=direct, decomposed=not direct,
         ),
         fit_kwargs=dict(

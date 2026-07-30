@@ -61,7 +61,7 @@ def main():
             polynomial_degree=rcfg['poly_degree'],
             dt=dcfg['dt'],
             num_euler_steps=rcfg['num_euler_steps'],
-            dynamics_dropout=0.1,
+            encoder_dropout=0.1,
             gru_layers=rcfg['gru_layers'],
             state_names=[f'z{i}' for i in range(dcfg['latent_dim'])],
             decomposed=True,

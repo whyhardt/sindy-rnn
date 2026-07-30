@@ -5,6 +5,12 @@ Unlike cylinder/SST, Lorenz is fully observed (no sparse sensors, no
 encoder/decoder) — this matches CLAUDE.md's direct application of
 PolynomialRNN + fit() via derivative matching. Run analyze.py afterward to
 compare against STLSQ on coefficient recovery + forecast error.
+
+Trains on states normalized by data.compute_scale() (per-state std, no
+mean-centering — see data.py for why only scale and not centering is safe
+here). The model itself, and its saved checkpoint, live entirely in this
+normalized frame; analyze.py converts back to raw units for comparison
+against the ground-truth ODE.
 """
 import os
 import sys
@@ -14,8 +20,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import torch
 
+from sindy_rnn.polynomial_library import get_library_feature_names
 from examples._common.estimators import PolynomialRNNEstimator
-from data import load_config, generate_or_load_data, chunk_trajectory, PARAMS_DIR
+from data import (
+    load_config, generate_or_load_data, chunk_trajectory, normalize,
+    rescale_coefficients, PARAMS_DIR,
+)
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -31,7 +41,11 @@ def main():
     print(f"  noise_frac={lcfg['noise_frac']}, n_steps={lcfg['n_steps']}")
 
     data = generate_or_load_data(cfg)
-    xs, ys = chunk_trajectory(data['noisy_train'], rcfg['window_size'])
+    scale = data['scale']
+    print(f"  Normalization scale (x,y,z): {scale}")
+
+    noisy_train_norm = normalize(data['noisy_train'], scale)
+    xs, ys = chunk_trajectory(noisy_train_norm, rcfg['window_size'])
 
     torch.manual_seed(lcfg['seed'])
     est = PolynomialRNNEstimator(
@@ -42,8 +56,6 @@ def main():
             ensemble_size=rcfg['ensemble_size'],
             dt=lcfg['dt'],
             state_names=['x', 'y', 'z'],
-            dropout=rcfg['dropout'],
-            feature_dropout=rcfg['feature_dropout'],
             compiled_forward=False,
             direct=False,
             decomposed=True,
@@ -66,10 +78,21 @@ def main():
     est.fit(xs, ys)
     elapsed = time.time() - t0
 
-    print("\n  Discovered equations:")
+    print("\n  Discovered equations (normalized units, z' = z / scale):")
     est.model.print_equations()
+
+    coefs = est.model.get_coefficients(aggregate=True)
+    coef_matrix = torch.stack([coefs[n] for n in est.model.state_names]).cpu().numpy()
+    coef_matrix_raw = rescale_coefficients(coef_matrix, 1 / scale, degree=rcfg['degree'])
+    term_names = get_library_feature_names(est.model.state_names, rcfg['degree'])
+    print("\n  Discovered equations (raw physical units):")
+    for i, name in enumerate(est.model.state_names):
+        terms = ' + '.join(f"{c:.3f}*{t}" for c, t in zip(coef_matrix_raw[i], term_names)
+                           if abs(c) > 1e-9)
+        print(f"  d{name}/dt = {terms}")
+
     active = est.model.count_active_terms()
-    print(f"  Active terms: {sum(active.values())}")
+    print(f"\n  Active terms: {sum(active.values())}")
     print(f"  Training time: {elapsed:.1f}s")
 
     os.makedirs(PARAMS_DIR, exist_ok=True)

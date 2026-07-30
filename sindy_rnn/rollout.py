@@ -53,8 +53,9 @@ class RolloutSINDyRNN(nn.Module):
         state_names: names for latent state variables
         decomposed: use decomposed polynomial parameterization
         direct: use direct polynomial parameterization
-        dynamics_dropout: dropout for polynomial layer
-        dynamics_feature_dropout: feature dropout for polynomial layer
+        encoder_dropout: dropout for the GRU encoder (only has an effect
+            when gru_layers > 1 — torch.nn.GRU's own inter-layer dropout).
+            Ignored when identity=True (no encoder).
         identity: if True, skip the GRU encoder and decoder — z IS the
             observed state. Requires n_sensors == n_latent == n_full.
     """
@@ -73,8 +74,7 @@ class RolloutSINDyRNN(nn.Module):
         state_names: Optional[List[str]] = None,
         decomposed: bool = True,
         direct: bool = False,
-        dynamics_dropout: float = 0.,
-        dynamics_feature_dropout: float = 0.,
+        encoder_dropout: float = 0.,
         compile_dynamics: bool = False,
         rollout_noise: float = 0.,
         identity: bool = False,
@@ -100,7 +100,7 @@ class RolloutSINDyRNN(nn.Module):
             n_sensors, n_latent,
             num_layers=gru_layers,
             batch_first=True,
-            dropout=dynamics_dropout,
+            dropout=encoder_dropout,
         )
 
         # Autonomous polynomial dynamics: dz/dt = P(z)
@@ -112,8 +112,6 @@ class RolloutSINDyRNN(nn.Module):
             polynomial_degree=polynomial_degree,
             dt=dt,
             state_names=state_names,
-            dropout=0.,
-            feature_dropout=0.,
             decomposed=decomposed,
             direct=direct,
             num_euler_steps=num_euler_steps,
@@ -122,16 +120,6 @@ class RolloutSINDyRNN(nn.Module):
         # Linear decoder (deliberately simple — prevents decoder absorbing dynamics)
         # Skipped when identity=True — z IS the full state.
         self.decoder = nn.Identity() if identity else nn.Linear(n_latent, n_full)
-        
-        # self.decoder = nn.Sequential(
-        #     nn.Linear(n_latent, 150),
-        #     nn.ReLU(),
-        #     nn.Dropout(dynamics_dropout),
-        #     nn.Linear(150, 450),
-        #     nn.ReLU(),
-        #     nn.Dropout(dynamics_dropout),
-        #     nn.Linear(450, n_full),
-        # )
         
         # Running z normalization between encoder and dynamics.
         # Polynomial always sees standardized z (≈ mean 0, std 1).
@@ -467,6 +455,8 @@ def fit_rollout(
     lr_factor: float = 0.5,
     min_lr: float = 1e-6,
     rollout_noise: float = 0.1,
+    refit_epochs: int = 0,
+    refit_learning_rate: Optional[float] = None,
     x_sparse_test: Optional[Tensor] = None,
     x_full_test: Optional[Tensor] = None,
     verbose: bool = True,
@@ -514,6 +504,16 @@ def fit_rollout(
         lr_patience: ReduceLROnPlateau patience (0 = no scheduler)
         lr_factor: LR reduction factor on plateau
         min_lr: minimum learning rate
+        refit_epochs: additional epochs at T_max with lambda_s=0, the mask
+            frozen, and the encoder/decoder frozen. Debiases the dynamics
+            coefficients for the already-discovered structure, which would
+            otherwise stay shrunk by the ongoing L1 penalty. Continues the
+            same trajectory-matching objective (unlike refit_rollout(),
+            which switches to derivative matching — that would undo the
+            noise-robustness of trajectory matching in identity mode).
+            0 = no refit (default).
+        refit_learning_rate: learning rate for refit phase
+            (default: learning_rate / 5)
         x_sparse_test: (N_test, n_sensors) — optional test sensor time series
         x_full_test: (N_test, n_full) — optional test full state time series
         verbose: print training progress
@@ -610,6 +610,20 @@ def fit_rollout(
 
                 loss = L_rec + L_z0 + L_sp
 
+                if not torch.isfinite(loss):
+                    # A long autonomous rollout can transiently blow up
+                    # (especially early in the curriculum, before the
+                    # polynomial has learned anything, on chaotic systems
+                    # like Lorenz). Applying nan/inf gradients here would
+                    # permanently corrupt every weight, so skip the update
+                    # instead and let training continue from the last good
+                    # state — mirrors sindy_shred_net.py's own safeguard.
+                    if verbose:
+                        print(f"  Non-finite loss at epoch {epoch}, batch {bi}: "
+                              f"skipping optimization step")
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -670,6 +684,76 @@ def fit_rollout(
     except KeyboardInterrupt:
         if verbose:
             print(f"\nTraining interrupted at epoch {epoch}.")
+
+    # Post-pruning refit: debias dynamics coefficients for the
+    # already-discovered structure. Freezes encoder/decoder (avoids a moving
+    # target — the polynomial would otherwise be debiasing against a
+    # shifting z) and continues the same trajectory-matching objective with
+    # lambda_s=0 and the mask frozen (no more pruning calls).
+    if refit_epochs > 0:
+        if model.encoder is not None:
+            for p in model.encoder.parameters():
+                p.requires_grad_(False)
+        for p in model.decoder.parameters():
+            p.requires_grad_(False)
+
+        refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate / 5
+        refit_optimizer = torch.optim.AdamW(model.dynamics.parameters(), lr=refit_lr)
+
+        if verbose:
+            active = model.count_active_terms()
+            total_active = sum(active.values())
+            print(f"\nRefit phase: {refit_epochs} epochs, lr={refit_lr:.1e}, "
+                  f"lambda_s=0, mask + encoder/decoder frozen "
+                  f"({total_active} active terms)")
+
+        span = T_w + T_cur
+        max_start = N_time - span
+
+        try:
+            for r_epoch in range(refit_epochs):
+                model.train()
+
+                n_samples = min(max_start, batches_per_epoch * batch_size)
+                all_starts = torch.randperm(max_start)[:n_samples]
+
+                epoch_rec_loss = 0.
+                n_batches = 0
+
+                for bi in range(0, len(all_starts), batch_size):
+                    starts = all_starts[bi:bi + batch_size]
+                    warmup_slices = [x_sparse_all[s:s + T_w] for s in starts]
+                    target_slices = [
+                        x_full_all[s + T_w - 1:s + T_w - 1 + T_cur + 1]
+                        for s in starts
+                    ]
+                    x_warmup = torch.stack(warmup_slices).to(device)
+                    x_targets = torch.stack(target_slices).to(device)
+
+                    x_hat, z_traj = model(x_warmup, T_cur)
+                    loss = F.mse_loss(x_hat, x_targets)
+
+                    if not torch.isfinite(loss):
+                        if verbose:
+                            print(f"  Non-finite loss in refit epoch {r_epoch}: "
+                                  f"skipping optimization step")
+                        refit_optimizer.zero_grad(set_to_none=True)
+                        continue
+
+                    refit_optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.dynamics.parameters(), grad_clip)
+                    refit_optimizer.step()
+
+                    epoch_rec_loss += loss.item()
+                    n_batches += 1
+
+                if verbose and (r_epoch % 50 == 0 or r_epoch == refit_epochs - 1):
+                    avg_rec = epoch_rec_loss / max(n_batches, 1)
+                    print(f"Refit {r_epoch:5d} | T_cur={T_cur:3d} | rec={avg_rec:.6f}")
+        except KeyboardInterrupt:
+            if verbose:
+                print(f"\nRefit interrupted at epoch {r_epoch}.")
 
     if verbose:
         print("\nDiscovered equations:")
@@ -794,8 +878,6 @@ def refit_rollout(
         polynomial_degree=dynamics.rnn._degree,
         dt=dt,
         state_names=dynamics.state_names,
-        dropout=0.,
-        feature_dropout=0.,
         decomposed=dynamics.rnn._decomposed,
         direct=dynamics.rnn._direct,
         compiled_forward=True,
