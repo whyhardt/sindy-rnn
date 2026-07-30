@@ -3,7 +3,7 @@
 Architecture:
   z_0 = GRU(sparse_sensors[0:T_w])      # encode 1-year warmup
   z_{t+1} = z_t + dt * P(z_t)            # autonomous polynomial ODE rollout
-  x_hat_t = W @ z_t + b                  # linear decoder at every step
+  x_hat_t = D(z_t)                       # MLP decoder at every step
 
 Trained end-to-end with per-step reconstruction loss + rollout curriculum.
 Run analyze.py afterward to benchmark reconstruction/forecast error.
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import torch
 
 from examples._common.estimators import RolloutSINDyRNNEstimator
-from data import load_config, load_data, get_sensor_locs, train_test_split, fit_scaler, PARAMS_DIR
+from data import load_config, load_data, get_sensor_locs, train_test_split, validation_frames, fit_scaler, PARAMS_DIR
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -36,65 +36,45 @@ def main():
     print(f"  Shape: ({n_time}, {full_dim})")
 
     train_end, test_frames = train_test_split(cfg, n_time)
+    val_frames = validation_frames(cfg, n_time)
     scaler = fit_scaler(X, train_end)
     X_scaled = scaler.transform(X)
     sensor_locs = get_sensor_locs(cfg, full_dim)
 
-    lags = dcfg['lags']
+    if rcfg.get('T_max') is None:
+        rcfg['T_max'] = len(test_frames)
+        print(f"  T_max not set in config; defaulting to test length ({rcfg['T_max']})")
+
+    T_w = dcfg['T_w']
     x_sparse_train = X_scaled[:train_end, sensor_locs]
     x_full_train = X_scaled[:train_end]
-    x_sparse_test = torch.tensor(X_scaled[train_end - lags:, sensor_locs], dtype=torch.float32)
-    x_full_test = torch.tensor(X_scaled[train_end - lags:], dtype=torch.float32)
+    x_sparse_val = torch.tensor(X_scaled[train_end - T_w:val_frames[-1] + 1, sensor_locs], dtype=torch.float32)
+    x_full_val = torch.tensor(X_scaled[train_end - T_w:val_frames[-1] + 1], dtype=torch.float32)
 
     print(f"  Train: {train_end} frames")
-    print(f"  Test: {n_time - train_end} frames (eval from frame {test_frames[0]})")
-    print(f"  Sensors: {dcfg['num_sensors']} of {full_dim}")
-    print(f"  Latent dim: {dcfg['latent_dim']}, Poly degree: {rcfg['poly_degree']}")
+    print(f"  Validation: {len(val_frames)} frames (monitored during training, frames {val_frames[0]}-{val_frames[-1]})")
+    print(f"  Test: {len(test_frames)} frames (eval from frame {test_frames[0]}, held out until analyze.py)")
+    print(f"  Sensors: {dcfg['n_sensors']} of {full_dim}")
+    print(f"  Latent dim: {dcfg['n_latent']}, Poly degree: {rcfg['polynomial_degree']}")
 
     est = RolloutSINDyRNNEstimator(
         device=DEVICE,
-        model_kwargs=dict(
-            n_sensors=dcfg['num_sensors'],
-            n_latent=dcfg['latent_dim'],
-            n_full=full_dim,
-            ensemble_size=rcfg['ensemble_size'],
-            polynomial_degree=rcfg['poly_degree'],
-            dt=dcfg['dt'],
-            num_euler_steps=rcfg['num_euler_steps'],
-            encoder_dropout=0.1,
-            gru_layers=rcfg['gru_layers'],
-            state_names=[f'z{i}' for i in range(dcfg['latent_dim'])],
-            decomposed=True,
-        ),
-        fit_kwargs=dict(
-            T_w=lags,
-            T_max=rcfg['t_max'],
-            T_start=rcfg['t_start'],
-            delta_T=rcfg['delta_t'],
-            epochs=rcfg['epochs'],
-            batch_size=rcfg['batch_size'],
-            batches_per_epoch=rcfg['batches_per_epoch'],
-            learning_rate=rcfg['lr'],
-            lambda_0=rcfg['lambda_0'],
-            lambda_s=rcfg['lambda_s'],
-            grad_clip=rcfg['grad_clip'],
-            pruning_threshold=rcfg['pruning_threshold'],
-            pruning_frequency=rcfg['pruning_frequency'],
-            pruning_method='agreement',
-            lr_patience=100,
-            x_sparse_test=x_sparse_test,
-            x_full_test=x_full_test,
-            verbose=True,
-        ),
+        n_full=full_dim,
+        x_sparse_test=x_sparse_val,
+        x_full_test=x_full_val,
+        verbose=True,
+        **dcfg,
+        **rcfg,
     )
 
     t0 = time.time()
     est.fit(x_sparse_train, x_full_train)
     elapsed = time.time() - t0
 
-    print("\n  Discovered equations:")
-    est.model.print_equations()
-    active = est.model.count_active_terms()
+    member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+    print(f"\n  Discovered equations{' (best member)' if member is not None else ''}:")
+    est.model.print_equations(member=member)
+    active = est.model.count_active_terms(member=member)
     print(f"  Active terms: {sum(active.values())}")
     print(f"  Training time: {elapsed:.1f}s")
 

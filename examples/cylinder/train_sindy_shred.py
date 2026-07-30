@@ -38,15 +38,12 @@ def main():
     train_length, train_end, test_frames = train_test_split(cfg, n_time)
     sensor_locs = get_sensor_locs(cfg, full_dim)
 
-    # SINDySHRED's own validate split covers the same held-out region as
-    # our test_frames (matches the original benchmark's split convention).
-    validate_length = n_time - train_end
-
     est = SindyShredEstimator(
-        sensor_locations=sensor_locs, dt=dcfg['dt'], lags=dcfg['lags'],
-        train_length=train_length, validate_length=validate_length,
+        sensor_locations=sensor_locs, dt=dcfg['dt'], lags=dcfg['T_w'],
+        train_length=train_length, validate_length=dcfg['validate_length'],
+        test_length=dcfg['test_length'],
         seed=dcfg['sensor_seed'], device=DEVICE,
-        latent_dim=dcfg['latent_dim'], poly_order=scfg['poly_order'],
+        latent_dim=dcfg['n_latent'], poly_order=scfg['poly_order'],
         hidden_layers=scfg['gru_layers'], l1=scfg['decoder_l1'], l2=scfg['decoder_l2'],
         dropout=scfg['dropout'], batch_size=scfg['batch_size'],
         num_epochs=scfg['epochs'], lr=scfg['lr'],

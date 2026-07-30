@@ -78,7 +78,7 @@ def test_non_identity_unaffected():
                             decomposed=True)
     assert model.identity is False
     assert isinstance(model.encoder, torch.nn.GRU)
-    assert isinstance(model.decoder, torch.nn.Linear)
+    assert isinstance(model.decoder, torch.nn.Sequential)
 
     x_sparse = torch.randn(100, 2)
     x_full = torch.randn(100, 4)

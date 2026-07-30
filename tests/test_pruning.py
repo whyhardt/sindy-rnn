@@ -3,7 +3,10 @@
 import torch
 import pytest
 from sindy_rnn import PolynomialRNN, agreement_test
-from sindy_rnn.pruning import ensemble_prune, threshold_patience_update, threshold_prune
+from sindy_rnn.pruning import (
+    ensemble_prune, threshold_patience_update, threshold_prune,
+    ladder_threshold_test,
+)
 
 
 def test_agreement_test_all_agree_survives():
@@ -235,3 +238,63 @@ def test_ensemble_prune_median_method():
         ensemble_prune(model, delta=0.01, method='median')
 
     assert not model.coefficient_masks.any()
+
+
+def test_ladder_threshold_test_thresholds_increase_with_index():
+    """Member e's effective threshold is delta * 10**(0.2*e - 1), so a fixed
+    coefficient survives on later (lenient) members but not earlier
+    (aggressive) ones."""
+    E = 10
+    coefficients = torch.full((E, 1, 1), 0.5)
+    presence = torch.ones((E, 1, 1), dtype=torch.bool)
+
+    result = ladder_threshold_test(coefficients, presence, delta=1.0)
+
+    # delta_e = 10**(0.2*e - 1): 0.1, 0.158, 0.251, 0.398, 0.631, 1.0, 1.585, ...
+    # 0.5 clears the threshold for e=0..3 (delta_e < 0.5) and fails from e=4 on.
+    expected = torch.tensor(
+        [True, True, True, True, False, False, False, False, False, False]
+    ).view(E, 1, 1)
+    assert torch.equal(result, expected)
+
+
+def test_ensemble_prune_ladder_method_all_pruned():
+    """method='ladder' prunes each member independently against its own
+    rung. With all-zero coefficients, every member's coefficient is below
+    even the most lenient rung, so everything is pruned regardless of the
+    per-member threshold spread."""
+    torch.manual_seed(0)
+
+    model = PolynomialRNN(
+        n_states=1, n_controls=0, ensemble_size=10,
+        polynomial_degree=2, compiled_forward=False,
+        decomposed=False,
+    )
+
+    with torch.no_grad():
+        for w in model.rnn.projection.weights:
+            w.fill_(0.0)
+        for b in model.rnn.projection.biases:
+            b.fill_(0.0)
+
+    with torch.no_grad():
+        ensemble_prune(model, delta=0.01, method='ladder')
+        ensemble_prune(model, delta=0.01, method='ladder')
+
+    assert not model.coefficient_masks.any()
+
+
+def test_ensemble_prune_ladder_method_no_cross_member_vote():
+    """Unlike agreement/median, ladder pruning can leave different members
+    with different surviving masks — there's no shared vote."""
+    theta = torch.zeros(4, 1, 3)
+    mask = torch.ones(4, 1, 3, dtype=torch.bool)
+    # A term at 0.5: with delta=1.0, rungs are ~0.1,0.158,0.251,0.398 for
+    # e=0..3 — 0.5 clears all four, so this alone wouldn't show independence.
+    # Use a value that clears late rungs but not early ones instead.
+    theta[:, 0, 0] = 0.3  # clears e=2,3 (0.251, 0.398 -> only e<=2... )
+    significant = ladder_threshold_test(theta, mask, delta=1.0)
+    # e=0: rung 0.1 -> 0.3 survives; e=1: rung 0.158 -> survives;
+    # e=2: rung 0.251 -> survives; e=3: rung 0.398 -> fails.
+    assert significant[0, 0, 0] and significant[1, 0, 0] and significant[2, 0, 0]
+    assert not significant[3, 0, 0]

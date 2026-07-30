@@ -62,27 +62,31 @@ def main():
     rnn_path = os.path.join(PARAMS_DIR, 'sindy_rnn.pt')
     if os.path.exists(rnn_path):
         print("\nEvaluating sindy-rnn...")
-        est = RolloutSINDyRNNEstimator.load(rnn_path, device=DEVICE, T_w=dcfg['lags'])
+        est = RolloutSINDyRNNEstimator.load(
+            rnn_path, device=DEVICE, T_w=dcfg['T_w'],
+            simulate=cfg['sindy_rnn'].get('simulate', 'mean'))
 
         recons = _rescale(est.predict(X_scaled[:, sensor_locs]), scaler)
         recon_mse, recon_rel, n_recon = evaluate_on_frames(recons, X, test_frames)
 
-        warmup = X_scaled[train_end - dcfg['lags']:train_end, sensor_locs]
+        warmup = X_scaled[train_end - dcfg['T_w']:train_end, sensor_locs]
         forecast_scaled = est.simulate(warmup, n_time - train_end)
         forecast = np.full((n_time, full_dim), np.nan)
         forecast[train_end:] = scaler.inverse_transform(forecast_scaled)
         fore_mse, fore_rel, n_fore = evaluate_on_frames(forecast, X, test_frames)
 
-        active = est.model.count_active_terms()
+        member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+        active = est.model.count_active_terms(member=member)
         print(f"  Reconstruction rel. error: {100 * recon_rel:.2f}% ({n_recon} frames)")
         print(f"  Forecast rel. error:       {100 * fore_rel:.2f}% ({n_fore} frames)")
-        print(f"  Active terms: {sum(active.values())}")
+        print(f"  Active terms: {sum(active.values())}"
+              f"{' (best member)' if member is not None else ''}")
 
         metrics['sindy-rnn'] = {
             'recon_mse': float(recon_mse), 'recon_rel_error': float(recon_rel),
             'forecast_mse': float(fore_mse), 'forecast_rel_error': float(fore_rel),
             'n_active_terms': sum(active.values()),
-            'equations': est.model.get_equations(),
+            'equations': est.model.get_equations(member=member),
         }
 
         plot_field_comparison(X, recons, train_end,

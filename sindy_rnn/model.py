@@ -595,6 +595,15 @@ class PolynomialRNN(nn.Module):
             torch.zeros(ensemble_size, n_states, n_library_terms, dtype=torch.int32)
         )
 
+        # Index of the ensemble member with the best training-data fit,
+        # set by select_best_member() at the end of training. Lets
+        # predict()/simulate() switch between the ensemble mean and this
+        # single member (examples/_common/estimators.py's `simulate=`
+        # mode) without retraining. Defaults to 0 until select_best_member
+        # is called (also the value restored for older checkpoints that
+        # predate this buffer, via load()'s strict=False).
+        self.register_buffer('best_member_idx', torch.zeros((), dtype=torch.long))
+
         # Library term names
         feature_names = self.state_names + self.control_names
         self.library_terms = get_library_feature_names(feature_names, polynomial_degree)
@@ -642,12 +651,17 @@ class PolynomialRNN(nn.Module):
         predictions = torch.stack(predictions, dim=2)  # (E, B, T, n_states)
         return predictions, predictions[:, :, -1, :]
 
-    def get_equations(self) -> str:
-        """Return discovered equations as formatted string."""
-        from .equations import get_equations
-        return get_equations(self)
+    def get_equations(self, member: Optional[int] = None) -> str:
+        """Return discovered equations as formatted string.
 
-    def get_continuous_equations(self, dt: float = None) -> str:
+        member: if given (e.g. self.best_member_idx.item() after
+            select_best_member()), report that single ensemble member's own
+            equations instead of the ensemble-mean aggregate.
+        """
+        from .equations import get_equations
+        return get_equations(self, member=member)
+
+    def get_continuous_equations(self, dt: float = None, member: Optional[int] = None) -> str:
         """Return continuous-time ODE form of discovered equations.
 
         With Euler parameterization, theta directly represents the ODE.
@@ -655,23 +669,59 @@ class PolynomialRNN(nn.Module):
         (model's stored dt is used).
         """
         from .equations import get_continuous_equations
-        return get_continuous_equations(self)
+        return get_continuous_equations(self, member=member)
 
-    def get_coefficients(self, aggregate=True) -> Dict[str, Tensor]:
+    def get_coefficients(self, aggregate=True, member: Optional[int] = None) -> Dict[str, Tensor]:
         """Return effective polynomial coefficients per state dimension."""
         from .equations import get_coefficients
-        return get_coefficients(self, aggregate=aggregate)
+        return get_coefficients(self, aggregate=aggregate, member=member)
 
-    def count_active_terms(self) -> Dict[str, int]:
-        """Count active (unmasked) polynomial terms per state dimension."""
+    def count_active_terms(self, member: Optional[int] = None) -> Dict[str, int]:
+        """Count active (unmasked) polynomial terms per state dimension.
+
+        member: if given, count only that ensemble member's own mask
+            instead of the union (`.any(dim=0)`) across all members.
+        """
         result = {}
         for i, name in enumerate(self.state_names):
-            result[name] = self.coefficient_masks[:, i, :].any(dim=0).sum().item()
+            masks_i = self.coefficient_masks[:, i, :]
+            active = masks_i[member] if member is not None else masks_i.any(dim=0)
+            result[name] = active.sum().item()
         return result
 
-    def print_equations(self):
+    def print_equations(self, member: Optional[int] = None):
         """Print discovered equations to stdout."""
-        print(self.get_equations())
+        print(self.get_equations(member=member))
+
+    def select_best_member(self, xs: Tensor, ys: Tensor) -> int:
+        """Score each ensemble member's own next-step prediction fit on
+        (xs, ys) and store the best (lowest NaN-masked MSE) member's index
+        in best_member_idx.
+
+        Evaluated via forward() — the same call predict() makes — so the
+        ranking matches whichever member actually reconstructs the training
+        data best, not an internal training objective (e.g. derivative
+        matching) that may differ from the prediction task.
+
+        Args:
+            xs: (B, T, n_states + n_controls) — same training inputs used to fit()
+            ys: (B, T, n_states) — same training targets used to fit()
+
+        Returns:
+            Index of the best-fitting ensemble member (also stored on the model).
+        """
+        was_training = self.training
+        self.eval()
+        with torch.no_grad():
+            preds, _ = self.forward(xs)  # (E, B, T, n_states)
+            target = ys.unsqueeze(0).expand_as(preds)
+            valid = ~torch.isnan(target.sum(-1))  # (E, B, T)
+            se = ((preds - target) ** 2) * valid.unsqueeze(-1)
+            counts = valid.sum(dim=(1, 2)).clamp(min=1) * self.n_states  # (E,)
+            member_loss = se.sum(dim=(1, 2, 3)) / counts
+            self.best_member_idx.fill_(int(torch.argmin(member_loss).item()))
+        self.train(was_training)
+        return self.best_member_idx.item()
 
     def save(self, path: str):
         """Save model weights + sparsity masks + patience counters."""

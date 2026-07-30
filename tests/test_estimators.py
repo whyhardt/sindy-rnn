@@ -25,7 +25,7 @@ def test_polynomial_rnn_estimator_fit_predict_simulate(tmp_path):
     est = PolynomialRNNEstimator(
         model_kwargs=dict(n_states=2, n_controls=0, ensemble_size=2,
                           polynomial_degree=1, dt=1.0, compiled_forward=False),
-        fit_kwargs=dict(epochs=10, warmup_steps=3, learning_rate=1e-2, l2=1e-4,
+        fit_kwargs=dict(epochs=10, warmup_steps=3, learning_rate=1e-2, lambda_s=1e-4,
                         centered_diff=False, verbose=False),
     )
     est.fit(xs, ys)
@@ -48,10 +48,10 @@ def test_rollout_sindy_rnn_estimator_identity_fit_predict_simulate(tmp_path):
     x = (np.random.default_rng(0).standard_normal((T + 1, 3)) * 0.1).astype(np.float32)
 
     est = RolloutSINDyRNNEstimator(
-        model_kwargs=dict(n_sensors=3, n_latent=3, n_full=3, ensemble_size=2,
-                          polynomial_degree=2, dt=0.01, decomposed=True, identity=True),
-        fit_kwargs=dict(T_w=1, T_max=4, T_start=1, delta_T=1, epochs=5,
-                        batch_size=4, batches_per_epoch=1, verbose=False),
+        n_sensors=3, n_latent=3, n_full=3, ensemble_size=2,
+        polynomial_degree=2, dt=0.01, decomposed=True, identity=True,
+        T_w=1, T_max=4, T_start=1, delta_T=1, epochs=5,
+        batch_size=4, batches_per_epoch=1, verbose=False,
     )
     est.fit(x[:T], x[:T])
 
@@ -77,10 +77,10 @@ def test_rollout_sindy_rnn_estimator_sparse_sensors(tmp_path):
     x_sparse = x_full[:, :2]
 
     est = RolloutSINDyRNNEstimator(
-        model_kwargs=dict(n_sensors=2, n_latent=3, n_full=4, ensemble_size=2,
-                          polynomial_degree=2, dt=0.1, gru_layers=1, decomposed=True),
-        fit_kwargs=dict(T_w=5, T_max=3, T_start=1, delta_T=1, epochs=3,
-                        batch_size=4, batches_per_epoch=1, verbose=False),
+        n_sensors=2, n_latent=3, n_full=4, ensemble_size=2,
+        polynomial_degree=2, dt=0.1, gru_layers=1, decomposed=True,
+        T_w=5, T_max=3, T_start=1, delta_T=1, epochs=3,
+        batch_size=4, batches_per_epoch=1, verbose=False,
     )
     est.fit(x_sparse, x_full)
     pred = est.predict(x_sparse)

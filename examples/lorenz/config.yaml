@@ -7,32 +7,33 @@
 # recovery_run.py / recovery_aggregate.py in this folder.
 
 lorenz:
-  sigma: 10.0
-  rho: 28.0
-  beta: 2.6666666666666665
-  dt: 0.01
-  n_steps: 5000            # training trajectory length
-  forecast_steps: 5000      # autonomous forecast horizon for evaluation
-  noise_frac: 0.10
-  seed: 42
-  noise_seed: 0
+  sigma: 10.0                             # Lorenz ODE parameter
+  rho: 28.0                               # Lorenz ODE parameter
+  beta: 2.6666666666666665                # Lorenz ODE parameter (8/3)
+  dt: 0.01                                # integration timestep
+  n_steps: 5000                           # training trajectory length
+  forecast_steps: 5000                     # autonomous forecast horizon for evaluation
+  noise_frac: 0.                          # observation noise as fraction of state std
+  seed: 42                                # trajectory generation seed
+  noise_seed: 0                           # noise sampling seed
 
+# Derivative-matching sindy-rnn (PolynomialRNN + fit()) — see train_sindy_rnn.py
 sindy_rnn:
-  degree: 2
-  ensemble_size: 10
-  epochs: 1000
-  warmup_steps: 500
-  window_size: 100
-  learning_rate: 0.05
-  l2: 0.05
-  pruning_frequency: 20
-  pruning_threshold: 0.05
-  agreement_frac: 0.5
-  refit_epochs: 200
-
-stlsq:
-  threshold: 0.05
-  n_models: 10               # bagging ensemble size (match sindy-rnn E)
+  degree: 2                               # polynomial degree
+  ensemble_size: 1                        # number of dynamics ensemble members
+  epochs: 5000                            # total training epochs
+  warmup_steps: 1000                       # epochs before pruning begins
+  window_size: 100                        # trajectory chunk length per training window
+  learning_rate: 0.05                     # AdamW learning rate
+  lambda_s: 0.05                          # L2 penalty weight on polynomial coefficients
+  weight_decay: 0.0                       # AdamW weight decay on all params (on top of lambda_s on theta)
+  pruning_frequency: 50                   # epochs between pruning passes
+  pruning_threshold: 0.5                  # min |coefficient| to count as "present"
+  pruning_method: agreement               # 'agreement', 'median', or 'ladder' ensemble pruning test
+  agreement_frac: 0.5                     # fraction of ensemble that must agree to survive
+  refit_epochs: 200                       # extra epochs post-pruning, penalty off, mask frozen
+  lr_patience: 0                          # ReduceLROnPlateau patience (0 = no scheduler)
+  simulate: best                          # 'mean' (ensemble average) or 'best' (single-best-fitting member, set at train time)
 
 # Trajectory-matching alternative to sindy_rnn's derivative matching: same
 # RolloutSINDyRNN curriculum used for cylinder/SST, but with identity=True
@@ -43,25 +44,37 @@ stlsq:
 # (~110 steps at dt=0.01, since Lorenz's leading Lyapunov exponent is ~0.9)
 # — beyond that, trajectory MSE against one noisy realization stops being a
 # meaningful training signal for a chaotic system.
+#
+# Keys here match RolloutSINDyRNN's constructor / fit_rollout()'s parameter
+# names exactly (see examples/_common/estimators.py's RolloutSINDyRNNEstimator)
+# so this whole section can be forwarded with **rcfg — add a new tunable
+# kwarg here and it's picked up automatically, no script edit needed.
 sindy_rnn_rollout:
-  degree: 2
-  ensemble_size: 10
-  t_max: 20
-  t_start: 1
-  delta_t: 2
-  epochs: 1000
-  batch_size: 256
-  batches_per_epoch: 8
-  lr: 0.05
-  lambda_0: 0.
-  lambda_s: 0.05
-  grad_clip: 0.5
-  pruning_threshold: 0.05
-  pruning_frequency: 20
-  agreement_frac: 0.5
-  rollout_noise: 0.05
-  refit_epochs: 200            # debias coefficients after structure is found; 0 = no refit
-  refit_learning_rate: 0.01
-  lr_patience: 0                # ReduceLROnPlateau; 0 = no scheduler
-  lr_factor: 0.5
-  min_lr: 1.0e-6
+  polynomial_degree: 2                    # cubic dynamics (reference ODE has cubic terms)
+  ensemble_size: 10                       # number of dynamics ensemble members
+  num_euler_steps: 3                      # sub-steps per dt during rollout integration
+  decomposed: true                        # per-degree polynomial parameterization
+  T_max: 100                              # max rollout length = 2 seconds
+  T_start: 1                              # initial rollout length at curriculum start
+  delta_T: 1                              # rollout length increment per curriculum step
+  epochs: 200                             # total training epochs
+  batch_size: 16                          # small — full_dim scales with downsample above
+  batches_per_epoch: 8                    # mini-batches sampled per epoch
+  learning_rate: 0.005                    # Adam learning rate
+  lambda_s: 0.05                          # sparsity penalty on polynomial coefficients
+  weight_decay: 0. #0.05                      # AdamW weight decay on encoder/decoder only
+  grad_clip: 1.0                          # gradient clipping norm
+  pruning_threshold: 0.1                  # min |coefficient| to count as "present"
+  pruning_frequency: 20                   # epochs between pruning passes
+  pruning_method: agreement               # 'agreement', 'median', or 'ladder' ensemble pruning test
+  agreement_frac: 0.5                     # agreement rate across ensemble members on term presence
+  lr_patience: 20                         # ReduceLROnPlateau patience (0 = no scheduler)
+  refit_epochs: 200                       # extra epochs post-pruning, penalty off, mask frozen
+  rollout_noise: 0.1                      # per-step noise injected into z during training
+  simulate: mean                          # 'mean' (ensemble average) or 'best' (single-best-fitting member, set at train time)
+
+# E-SINDy
+stlsq:
+  threshold: 0.5                          # STLSQ coefficient thresholding cutoff
+  alpha: 0.05                             # STLSQ ridge regression regularization strength
+  n_models: 10                            # bagging ensemble size (match sindy-rnn E)

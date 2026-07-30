@@ -6,3 +6,4 @@ pytest
 pysindy>=2.0
 pyyaml
 scikit-learn
+tqdm

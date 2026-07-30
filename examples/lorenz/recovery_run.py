@@ -84,7 +84,7 @@ def run_sindy_rnn(trajectory_noisy, direct, seed):
             pruning_threshold=RNN_CONFIG['pruning_threshold'],
             pruning_frequency=RNN_CONFIG['pruning_frequency'],
             pruning_method='agreement', learning_rate=RNN_CONFIG['learning_rate'],
-            l2=RNN_CONFIG['l2'], refit_epochs=RNN_CONFIG['refit_epochs'],
+            lambda_s=RNN_CONFIG['lambda_s'], refit_epochs=RNN_CONFIG['refit_epochs'],
             verbose=False,
         ),
     )
@@ -96,7 +96,7 @@ def run_sindy_rnn(trajectory_noisy, direct, seed):
 
 
 def run_esindy(trajectory_noisy):
-    est = StlsqEstimator(threshold=ESINDY_CONFIG['threshold'],
+    est = StlsqEstimator(threshold=ESINDY_CONFIG['threshold'], alpha=ESINDY_CONFIG['alpha'],
                          n_models=ESINDY_CONFIG['n_models'], degree=2, dt=DT)
     est.fit(trajectory_noisy)
     n_active = int(np.count_nonzero(est.coef_matrix))

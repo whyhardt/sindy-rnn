@@ -3,44 +3,60 @@
 # the train/test split are guaranteed identical across methods.
 
 data:
-  path: data/flow_over_cylinder.npy
-  num_sensors: 200
-  sensor_seed: 0
-  latent_dim: 4
-  dt: 0.03333333333333333    # 1/30 (30 FPS)
-  lags: 60                    # T_w = 2 seconds warmup
-  frame_rows: 400
-  frame_cols: 1000
-  test_holdout: 67            # frames held out after the warmup-adjusted train split
+  path: data/flow_over_cylinder.npy       # raw data file, relative to this folder
+  n_sensors: 200                          # number of sparse sensor locations
+  sensor_seed: 0                          # RNG seed for sensor location sampling
+  n_latent: 4                             # GRU encoder / polynomial dynamics latent dim
+  dt: 0.03333333333333333                 # 1/30 (30 FPS)
+  frame_rows: 400                         # raw frame height, before downsampling
+  frame_cols: 1000                        # raw frame width, before downsampling
+  downsample: 2                           # block-mean pool factor per side; 400x1000 -> 200x500
+  T_w: 60                                 # warmup window = 2 seconds
+  validate_length: 30                     # validation buffer, monitored during training
+  test_length: 60                         # true held-out test tail, untouched until analyze.py
+# train_length is inferred: n_time - T_w - validate_length - test_length
 
+# Keys here match RolloutSINDyRNN's constructor / fit_rollout()'s parameter
+# names exactly (see examples/_common/estimators.py's RolloutSINDyRNNEstimator)
+# so this whole section can be forwarded with **rcfg — add a new tunable
+# kwarg here and it's picked up automatically, no script edit needed.
 sindy_rnn:
-  poly_degree: 3               # cubic dynamics (reference ODE has cubic terms)
-  ensemble_size: 11
-  num_euler_steps: 3
-  gru_layers: 2
-  t_max: 60                    # max rollout length = 2 seconds
-  t_start: 1
-  delta_t: 2
-  epochs: 1000
-  batch_size: 16                # small — full_dim = 400K
-  batches_per_epoch: 8
-  lr: 0.005
-  lambda_0: 0.001               # z_0 norm regularization
-  lambda_s: 0.01                # L1 sparsity on polynomial coefficients
-  grad_clip: 0.5
-  pruning_threshold: 0.1
-  pruning_frequency: 100
+  polynomial_degree: 3                    # cubic dynamics (reference ODE has cubic terms)
+  ensemble_size: 10                       # number of dynamics ensemble members
+  num_euler_steps: 3                      # sub-steps per dt during rollout integration
+  gru_layers: 2                           # number of GRU encoder layers
+  decomposed: true                        # per-degree polynomial parameterization
+  encoder_dropout: 0.1                    # dropout on GRU encoder + decoder hidden layers
+  T_max: null                             # max rollout length = 2 seconds
+  T_start: 1                              # initial rollout length at curriculum start
+  delta_T: 1                              # rollout length increment per curriculum step
+  epochs: 500                             # total training epochs
+  batch_size: 16                          # small — full_dim scales with downsample above
+  batches_per_epoch: 8                    # mini-batches sampled per epoch
+  learning_rate: 0.005                    # Adam learning rate
+  lambda_0: 0. #0.01                          # z_0 norm regularization
+  lambda_s: 0. #0.05                          # sparsity penalty on polynomial coefficients
+  weight_decay: 0.01                      # AdamW weight decay on encoder/decoder only
+  grad_clip: 1.0                          # gradient clipping norm
+  pruning_threshold: 0.1                  # min |coefficient| to count as "present"
+  pruning_frequency: 50                   # epochs between pruning passes
+  pruning_method: ladder                  # 'agreement', 'median', or 'ladder' ensemble pruning test
+  agreement_frac: 0.5                     # agreement rate across ensemble members on term presence
+  lr_patience: 50                         # ReduceLROnPlateau patience (0 = no scheduler)
+  refit_epochs: 200                       # extra epochs post-pruning, penalty off, mask frozen
+  rollout_noise: 0.01                     # per-step noise injected into z during training
+  simulate: best                          # 'mean' (ensemble average) or 'best' (single-best-fitting member, set at train time)
 
 sindy_shred:
-  poly_order: 3
-  gru_layers: 2
-  decoder_l1: 350
-  decoder_l2: 400
-  dropout: 0.1
-  epochs: 1000
-  batch_size: 64
-  lr: 0.0005
-  threshold: 0.001
-  patience: 20
-  sindy_reg: 10.0
-  thres_epoch: 300
+  poly_order: 3                           # SINDy library polynomial degree
+  gru_layers: 2                           # number of GRU encoder layers
+  decoder_l1: 350                         # decoder's first hidden layer width
+  decoder_l2: 400                         # decoder's second hidden layer width
+  dropout: 0.1                            # dropout on encoder + decoder
+  epochs: 1000                            # total training epochs
+  batch_size: 64                          # mini-batch size
+  lr: 0.0005                              # Adam learning rate
+  threshold: 0.001                        # SINDy coefficient thresholding cutoff
+  patience: 20                            # early-stopping patience (epochs)
+  sindy_reg: 10.0                         # SINDy regression loss weight
+  thres_epoch: 300                        # epoch at which thresholding begins

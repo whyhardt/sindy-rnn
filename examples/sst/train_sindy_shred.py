@@ -19,7 +19,7 @@ np.math = math  # pysindy uses np.math.factorial
 import torch
 
 from examples._common.estimators import SindyShredEstimator
-from data import load_config, load_data, get_sensor_locs, train_test_split, PARAMS_DIR
+from data import load_config, load_data, get_sensor_locs, train_test_split, train_length, PARAMS_DIR
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -39,10 +39,11 @@ def main():
     sensor_locs = get_sensor_locs(cfg, full_dim)
 
     est = SindyShredEstimator(
-        sensor_locations=sensor_locs, dt=dcfg['dt'], lags=dcfg['lags'],
-        train_length=dcfg['train_length'], validate_length=dcfg['validate_length'],
+        sensor_locations=sensor_locs, dt=dcfg['dt'], lags=dcfg['T_w'],
+        train_length=train_length(cfg, n_time), validate_length=dcfg['validate_length'],
+        test_length=dcfg['test_length'],
         seed=dcfg['sensor_seed'], device=DEVICE,
-        latent_dim=dcfg['latent_dim'], poly_order=scfg['poly_order'],
+        latent_dim=dcfg['n_latent'], poly_order=scfg['poly_order'],
         hidden_layers=scfg['gru_layers'], l1=scfg['decoder_l1'], l2=scfg['decoder_l2'],
         dropout=scfg['dropout'], batch_size=scfg['batch_size'],
         num_epochs=scfg['epochs'], lr=scfg['lr'],

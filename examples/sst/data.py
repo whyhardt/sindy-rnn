@@ -40,7 +40,22 @@ def load_data(cfg):
 
 def get_sensor_locs(cfg, full_dim):
     rng = np.random.default_rng(cfg['data']['sensor_seed'])
-    return rng.choice(full_dim, size=cfg['data']['num_sensors'], replace=False)
+    return rng.choice(full_dim, size=cfg['data']['n_sensors'], replace=False)
+
+
+def train_length(cfg, n_time):
+    """train_length is inferred from the frame budget: warmup (T_w),
+    validate_length, and test_length are all set directly in config;
+    whatever's left goes to training.
+    """
+    dcfg = cfg['data']
+    train_length = n_time - dcfg['T_w'] - dcfg['validate_length'] - dcfg['test_length']
+    if train_length < 1:
+        raise ValueError(
+            f"T_w + validate_length + test_length "
+            f"({dcfg['T_w'] + dcfg['validate_length'] + dcfg['test_length']}) "
+            f"leaves no frames for training out of {n_time} total.")
+    return train_length
 
 
 def train_test_split(cfg, n_time):
@@ -50,15 +65,33 @@ def train_test_split(cfg, n_time):
     methods are scored on an identical, non-overlapping held-out region.
     """
     dcfg = cfg['data']
-    lags = dcfg['lags']
-    train_length = dcfg['train_length']
+    T_w = dcfg['T_w']
+    tr_length = train_length(cfg, n_time)
+    validate_length = dcfg['validate_length']
+    test_length = dcfg['test_length']
+
+    train_end = tr_length + T_w
+    shred_val_end = (tr_length + validate_length - 1) + T_w - 1
+    test_start = shred_val_end + 1
+    test_frames = np.arange(test_start, min(test_start + test_length, n_time))
+    return train_end, test_frames
+
+
+def validation_frames(cfg, n_time):
+    """Return the validation buffer frames — held out of training but
+    distinct from (and preceding) the test_frames returned by
+    train_test_split(). Used for progress monitoring during training so the
+    test set stays unseen until analyze.py.
+    """
+    dcfg = cfg['data']
+    T_w = dcfg['T_w']
+    tr_length = train_length(cfg, n_time)
     validate_length = dcfg['validate_length']
 
-    train_end = train_length + lags
-    shred_val_end = (train_length + validate_length - 1) + lags - 1
-    test_start = max(train_end, shred_val_end + 1)
-    test_frames = np.arange(test_start, n_time)
-    return train_end, test_frames
+    train_end = tr_length + T_w
+    shred_val_end = (tr_length + validate_length - 1) + T_w - 1
+    val_end = min(shred_val_end + 1, n_time)
+    return np.arange(train_end, val_end)
 
 
 def fit_scaler(X, train_end):

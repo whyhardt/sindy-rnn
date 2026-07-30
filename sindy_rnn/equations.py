@@ -10,14 +10,22 @@ import torch
 from torch import Tensor
 
 
-def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
+def get_coefficients(model, aggregate: bool = True, member: Optional[int] = None) -> Dict[str, Tensor]:
     """Return ODE coefficients for each state dimension.
 
     Coefficients directly represent the ODE dh/dt = P(h).
     Pruned terms are masked to zero.
 
+    Args:
+        aggregate: ignored when member is not None.
+        member: if given, return that single ensemble member's own
+            coefficients instead of aggregating — for reporting the model
+            actually used when simulate='best' (see
+            PolynomialRNN.select_best_member() / rollout.select_best_member()).
+
     Returns:
         dict mapping state_name -> Tensor
+            member given:    (n_terms,) that member's own coefficients
             aggregate=True:  (n_terms,) ensemble mean (NaN-aware, pruned->0)
             aggregate=False: (E, n_terms) per-member
     """
@@ -32,7 +40,9 @@ def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
         c_i = c[:, i, :]      # (E, n_terms)
         mask_i = mask[:, i, :]  # (E, n_terms)
 
-        if aggregate:
+        if member is not None:
+            c_i = c_i[member]
+        elif aggregate:
             c_agg = c_i.clone()
             # Mark pruned terms as NaN for nanmean
             c_agg = torch.where(
@@ -47,17 +57,21 @@ def get_coefficients(model, aggregate: bool = True) -> Dict[str, Tensor]:
     return results
 
 
-def get_equations(model) -> str:
+def get_equations(model, member: Optional[int] = None) -> str:
     """Return discovered ODE equations as a formatted multi-line string.
 
     Coefficients directly represent dh/dt = P(h).
+
+    Args:
+        member: if given, report that single ensemble member's own
+            equations instead of the ensemble-mean aggregate.
 
     Example output:
         dx/dt = -10.000*x + 10.000*y
         dy/dt = 28.000*x - 1.000*y - 1.000*x*z
         dz/dt = -2.667*z + 1.000*x*y
     """
-    coefs = get_coefficients(model, aggregate=True)
+    coefs = get_coefficients(model, aggregate=True, member=member)
     term_names = model.library_terms
     lines = []
 
@@ -90,11 +104,11 @@ def get_equations(model) -> str:
     return '\n'.join(lines)
 
 
-def get_continuous_equations(model, dt: float = None) -> str:
+def get_continuous_equations(model, dt: float = None, member: Optional[int] = None) -> str:
     """Return continuous-time ODE form of discovered equations.
 
     This is an alias for get_equations(). The dt parameter is kept
     for backward compatibility but is ignored (theta directly
     represents the ODE).
     """
-    return get_equations(model)
+    return get_equations(model, member=member)

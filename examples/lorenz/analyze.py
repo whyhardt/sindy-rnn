@@ -19,6 +19,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from examples._common.estimators import PolynomialRNNEstimator, RolloutSINDyRNNEstimator, StlsqEstimator
+from examples._common.plotting import plot_trajectory_grid
 from data import (
     load_config, generate_or_load_data, compute_forecast_mse,
     TRUE_COEFS, TRUE_ACTIVE, PARAMS_DIR, RESULTS_DIR,
@@ -44,8 +45,8 @@ def coefficient_metrics(coef_matrix):
     }
 
 
-def get_coef_matrix(model):
-    coefs = model.get_coefficients(aggregate=True)
+def get_coef_matrix(model, member=None):
+    coefs = model.get_coefficients(aggregate=True, member=member)
     coef_matrix = np.zeros((3, model.rnn._n_library_terms))
     for i, name in enumerate(model.state_names):
         coef_matrix[i] = coefs[name].cpu().numpy()
@@ -114,16 +115,18 @@ def main():
     rnn_path = os.path.join(PARAMS_DIR, 'sindy_rnn.pt')
     if os.path.exists(rnn_path):
         print("\nEvaluating sindy-rnn...")
-        est = PolynomialRNNEstimator.load(rnn_path)
-        coef_matrix = get_coef_matrix(est.model)
+        est = PolynomialRNNEstimator.load(
+            rnn_path, simulate=cfg['sindy_rnn'].get('simulate', 'mean'))
+        member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+        coef_matrix = get_coef_matrix(est.model, member=member)
 
         sim = est.simulate(h0[None, :], lcfg['forecast_steps'])[0]
         fore_mse, n_valid = compute_forecast_mse(clean_test, sim)
 
         m = coefficient_metrics(coef_matrix)
         m.update({'forecast_mse': float(fore_mse), 'n_valid': int(n_valid),
-                  'n_active': sum(est.model.count_active_terms().values()),
-                  'equations': est.model.get_equations()})
+                  'n_active': sum(est.model.count_active_terms(member=member).values()),
+                  'equations': est.model.get_equations(member=member)})
         metrics['sindy-rnn'] = m
         sims['sindy-rnn'] = sim
 
@@ -138,16 +141,19 @@ def main():
     rollout_path = os.path.join(PARAMS_DIR, 'sindy_rnn_rollout.pt')
     if os.path.exists(rollout_path):
         print("\nEvaluating sindy-rnn-rollout...")
-        est = RolloutSINDyRNNEstimator.load(rollout_path, T_w=1)
-        coef_matrix = get_coef_matrix(est.model.dynamics)
+        est = RolloutSINDyRNNEstimator.load(
+            rollout_path, T_w=1,
+            simulate=cfg['sindy_rnn_rollout'].get('simulate', 'mean'))
+        member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+        coef_matrix = get_coef_matrix(est.model.dynamics, member=member)
 
         sim = est.simulate(h0[None, :], lcfg['forecast_steps'])
         fore_mse, n_valid = compute_forecast_mse(clean_test, sim)
 
         m = coefficient_metrics(coef_matrix)
         m.update({'forecast_mse': float(fore_mse), 'n_valid': int(n_valid),
-                  'n_active': sum(est.model.count_active_terms().values()),
-                  'equations': est.model.get_equations()})
+                  'n_active': sum(est.model.count_active_terms(member=member).values()),
+                  'equations': est.model.get_equations(member=member)})
         metrics['sindy-rnn-rollout'] = m
         sims['sindy-rnn-rollout'] = sim
 
@@ -173,7 +179,10 @@ def main():
         m.update({'forecast_mse': float(fore_mse), 'n_valid': int(n_valid),
                   'n_active': int(np.count_nonzero(coef_matrix))})
         metrics['stlsq'] = m
-        sims['stlsq'] = sim
+        # Cap to forecast_steps for plotting — clean_test may be longer than
+        # the current config's forecast_steps if it came from a stale cache
+        # (data/lorenz_cache.npz) generated under a different value.
+        sims['stlsq'] = sim[:lcfg['forecast_steps']]
 
         print(f"  Coef. error: {m['coef_error']:.4f}  F1: {m['f1']:.3f}  "
               f"Exact match: {m['exact_match']}")
@@ -184,6 +193,16 @@ def main():
 
     # ── Plots ──
     if sims:
+        # STLSQ's truth line is capped to forecast_steps too — clean_test
+        # may be longer if it came from a stale cache (data/lorenz_cache.npz)
+        # generated under a different forecast_steps value.
+        rows = {
+            name: (clean_test[:lcfg['forecast_steps']] if name == 'stlsq' else clean_test, sim)
+            for name, sim in sims.items()
+        }
+        plot_trajectory_grid(
+            rows, os.path.join(RESULTS_DIR, 'trajectory_comparison.png'),
+            state_names=['x', 'y', 'z'], title='Lorenz — Truth vs Simulated')
         plot_forecasts(clean_test, sims, os.path.join(RESULTS_DIR, 'forecast_comparison.png'))
     if len(metrics) > 1:
         plot_coef_comparison(metrics, os.path.join(RESULTS_DIR, 'coefficient_comparison.png'))

@@ -150,6 +150,83 @@ def plot_forecast_mse(mse_per_step, save_path, dt=1.0, time_label='Forecast step
     print(f"  Saved: {save_path}")
 
 
+def plot_trajectory_grid(rows, save_path, state_names, title='Trajectory Comparison'):
+    """Grid of truth-vs-simulated trajectories: one row per data source
+    (method), one column per state — all sources in a single figure.
+
+    Args:
+        rows: dict {method_name: (true_traj, sim_traj)}. Each method
+            supplies its own truth array too (not just sim) since it may be
+            truncated differently per method (e.g. a stale cached ground
+            truth longer than the current forecast horizon for one method
+            but not another).
+        save_path: output PNG path.
+        state_names: list of per-state labels, e.g. ['x', 'y', 'z'].
+        title: figure suptitle.
+    """
+    names = list(rows.keys())
+    n_rows = len(names)
+    n_cols = len(state_names)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.2 * n_cols, 2.2 * n_rows),
+                             sharex='col', squeeze=False)
+
+    for r, name in enumerate(names):
+        true_traj, sim_traj = rows[name]
+        t_true = np.arange(len(true_traj))
+        t_sim = np.arange(len(sim_traj))
+        for c in range(n_cols):
+            ax = axes[r][c]
+            ax.plot(t_true, true_traj[:, c], 'k-', linewidth=1, label='Truth', alpha=0.7)
+            ax.plot(t_sim, sim_traj[:, c], 'r--', linewidth=1.2, label='Simulated')
+            if r == 0:
+                ax.set_title(state_names[c])
+            if r == n_rows - 1:
+                ax.set_xlabel('Step')
+            if c == 0:
+                ax.set_ylabel(name)
+            if r == 0 and c == n_cols - 1:
+                ax.legend(loc='upper right', fontsize=8)
+
+    fig.suptitle(title, fontsize=12)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Saved: {save_path}")
+
+
+def plot_trajectory_comparison(true_traj, sim_traj, save_path, state_names,
+                               title='Trajectory Comparison'):
+    """Overlay ground truth vs a single method's autonomous simulation, per state.
+
+    Args:
+        true_traj: (n_steps, n_states) ground truth trajectory.
+        sim_traj: (n_steps_sim, n_states) simulated trajectory (may be
+            shorter than true_traj if it diverged and was truncated).
+        save_path: output PNG path.
+        state_names: list of per-state labels, e.g. ['x', 'y', 'z'].
+    """
+    n_states = len(state_names)
+    fig, axes = plt.subplots(n_states, 1, figsize=(10, 2.2 * n_states), sharex=True)
+    if n_states == 1:
+        axes = [axes]
+
+    t_true = np.arange(len(true_traj))
+    t_sim = np.arange(len(sim_traj))
+    for d in range(n_states):
+        axes[d].plot(t_true, true_traj[:, d], 'k-', linewidth=1, label='Truth', alpha=0.7)
+        axes[d].plot(t_sim, sim_traj[:, d], 'r--', linewidth=1.2, label='Simulated')
+        axes[d].set_ylabel(state_names[d])
+        if d == 0:
+            axes[d].legend(loc='upper right', fontsize=8)
+
+    axes[-1].set_xlabel('Step')
+    fig.suptitle(title, fontsize=12)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Saved: {save_path}")
+
+
 def plot_method_comparison(metrics_by_method, save_path,
                            title='Method Comparison'):
     """Bar chart comparing reconstruction/forecast relative error across methods.

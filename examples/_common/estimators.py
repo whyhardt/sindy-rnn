@@ -3,6 +3,7 @@ simulate(x0, n_steps), save(path)/load(path). Whatever the underlying model
 naturally produces (a derivative, a next-state, a decoded full state) is
 just returned as-is — the wrapper doesn't care which.
 """
+import inspect
 import math
 import os
 
@@ -14,6 +15,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from sindy_rnn import PolynomialRNN, RolloutSINDyRNN, fit as fit_polynomial_rnn, fit_rollout
 
+_FIT_ROLLOUT_PARAMS = set(inspect.signature(fit_rollout).parameters)
+_ROLLOUT_MODEL_PARAMS = set(inspect.signature(RolloutSINDyRNN.__init__).parameters) - {'self'}
+
 
 def _to_tensor(x, device='cpu'):
     if isinstance(x, torch.Tensor):
@@ -22,13 +26,29 @@ def _to_tensor(x, device='cpu'):
 
 
 class PolynomialRNNEstimator:
-    """Wraps PolynomialRNN + fit() (derivative matching, full-state)."""
+    """Wraps PolynomialRNN + fit() (derivative matching, full-state).
+
+    `simulate='mean'` (default) reduces the ensemble dimension with a plain
+    mean, as before. `simulate='best'` instead indexes the single ensemble
+    member with the best training-data fit (model.best_member_idx, set by
+    PolynomialRNN.select_best_member() at the end of fit() — see
+    sindy_rnn/training.py). Determined at training time regardless of which
+    mode is requested at predict()/simulate() time, so switching between the
+    two doesn't require retraining.
+    """
 
     def __init__(self, device='cpu', **kwargs):
         self.device = device
+        self.simulate_mode = kwargs.pop('simulate', 'mean')
         self.model_kwargs = kwargs.pop('model_kwargs', {})
         self.fit_kwargs = kwargs.pop('fit_kwargs', kwargs)
         self.model = None
+
+    def _reduce_ensemble(self, tensor):
+        """tensor: (E, ...) -> (...) via mean or the stored best member."""
+        if self.simulate_mode == 'best':
+            return tensor[self.model.best_member_idx]
+        return tensor.mean(0)
 
     def fit(self, xs, ys):
         xs, ys = _to_tensor(xs), _to_tensor(ys)
@@ -41,7 +61,7 @@ class PolynomialRNNEstimator:
         self.model.eval()
         with torch.no_grad():
             y_hat, _ = self.model(xs)  # (E, B, T, n_states)
-        return y_hat.mean(0).cpu().numpy()
+        return self._reduce_ensemble(y_hat).cpu().numpy()
 
     def simulate(self, x0, n_steps):
         """Autonomous rollout from x0 (B, n_states) for n_steps."""
@@ -60,25 +80,56 @@ class PolynomialRNNEstimator:
                     integrator='rk4')
                 traj.append(h)
             traj = torch.stack(traj, dim=2)  # (E, B, n_steps+1, n_states)
-        return traj.mean(0)[:, 1:].cpu().numpy()
+        return self._reduce_ensemble(traj)[:, 1:].cpu().numpy()
 
     def save(self, path):
         self.model.save(path)
 
     @classmethod
-    def load(cls, path, device='cpu'):
-        est = cls(device=device)
+    def load(cls, path, device='cpu', simulate='mean'):
+        est = cls(device=device, simulate=simulate)
         est.model = PolynomialRNN.load(path).to(device)
         return est
 
 
 class RolloutSINDyRNNEstimator:
-    """Wraps RolloutSINDyRNN + fit_rollout() (sparse-sensor or identity)."""
+    """Wraps RolloutSINDyRNN + fit_rollout() (sparse-sensor or identity).
+
+    Both RolloutSINDyRNN's constructor kwargs (n_sensors, n_latent, ...,
+    dec_l1, ...) and fit_rollout()'s hyperparameters (T_w, T_max, ...) are
+    passed directly here, flat — no model_kwargs=/fit_kwargs= nesting. Each
+    name is routed to whichever of the two signatures it matches; anything
+    matching neither (e.g. a data-loading-only config key like `path` or
+    `sensor_seed`) is silently ignored, so a whole config section can be
+    forwarded with `**dcfg, **rcfg` without hand-picking which keys apply.
+
+    This means a typo'd or renamed kwarg fails silently (dropped, not
+    raised) rather than erroring — the tradeoff for not needing to touch
+    the call site every time a config key is added or renamed.
+
+    `rollout_noise` is the one name both fit_rollout() and the constructor
+    accept; it routes to fit_rollout() here, since fit_rollout()
+    unconditionally overwrites model.rollout_noise at fit time regardless
+    of what the constructor was given — the constructor's own default would
+    otherwise silently take effect only if you never call fit().
+
+    `simulate='mean'` (default) reduces the dynamics ensemble with a plain
+    mean during autonomous rollout, as before. `simulate='best'` instead
+    uses the single ensemble member with the best training-data
+    reconstruction fit (model._eq_dynamics.best_member_idx, set by
+    rollout.select_best_member() at the end of fit_rollout() — see
+    sindy_rnn/rollout.py). predict()'s same-timestep reconstruction doesn't
+    depend on this — encode() broadcasts one shared z_0 identically across
+    every ensemble member, so mean and best agree there; only simulate()'s
+    multi-step autonomous rollout actually diverges across members.
+    """
 
     def __init__(self, device='cpu', **kwargs):
         self.device = device
-        self.model_kwargs = kwargs.pop('model_kwargs', {})
-        self.fit_kwargs = kwargs.pop('fit_kwargs', kwargs)
+        self.simulate_mode = kwargs.pop('simulate', 'mean')
+        self.fit_kwargs = {k: v for k, v in kwargs.items() if k in _FIT_ROLLOUT_PARAMS}
+        self.model_kwargs = {k: v for k, v in kwargs.items()
+                             if k in _ROLLOUT_MODEL_PARAMS and k not in _FIT_ROLLOUT_PARAMS}
         self.T_w = self.fit_kwargs.get('T_w', 1)
         self.model = None
 
@@ -109,15 +160,15 @@ class RolloutSINDyRNNEstimator:
         """x0: (T_w, n_sensors) warmup window. Returns (n_steps, n_full)."""
         x0 = _to_tensor(x0, self.device).unsqueeze(0)
         self.model.eval()
-        x_hat, _ = self.model.forecast(x0, n_steps)
+        x_hat, _ = self.model.forecast(x0, n_steps, reduction=self.simulate_mode)
         return x_hat[0].cpu().numpy()
 
     def save(self, path):
         self.model.save(path)
 
     @classmethod
-    def load(cls, path, device='cpu', T_w=1):
-        est = cls(device=device, T_w=T_w)
+    def load(cls, path, device='cpu', T_w=1, simulate='mean'):
+        est = cls(device=device, fit_kwargs=dict(T_w=T_w), simulate=simulate)
         est.model = RolloutSINDyRNN.load(path).to(device)
         return est
 
@@ -131,12 +182,13 @@ class SindyShredEstimator:
     """
 
     def __init__(self, sensor_locations, dt, lags, train_length, validate_length,
-                seed=0, device='cpu', **shred_kwargs):
+                test_length=None, seed=0, device='cpu', **shred_kwargs):
         self.sensor_locations = sensor_locations
         self.dt = dt
         self.lags = lags
         self.train_length = train_length
         self.validate_length = validate_length
+        self.test_length = test_length
         self.seed = seed
         self.device = device
         self.shred_kwargs = shred_kwargs
@@ -155,7 +207,7 @@ class SindyShredEstimator:
         shred.fit(
             num_sensors=len(self.sensor_locations), dt=self.dt, x_to_fit=np.asarray(xs),
             lags=self.lags, train_length=self.train_length,
-            validate_length=self.validate_length,
+            validate_length=self.validate_length, test_length=self.test_length,
             sensor_locations=self.sensor_locations, seed=self.seed,
         )
         try:
@@ -281,8 +333,9 @@ class StlsqEstimator:
     outputs are Euler-integration-consistent with each other.
     """
 
-    def __init__(self, threshold=0.2, n_models=11, degree=2, dt=1.0):
+    def __init__(self, threshold=0.2, alpha=0.05, n_models=11, degree=2, dt=1.0):
         self.threshold = threshold
+        self.alpha = alpha
         self.n_models = n_models
         self.degree = degree
         self.dt = dt
@@ -299,7 +352,8 @@ class StlsqEstimator:
         z_dot = np.asarray(ys) if ys is not None else np.gradient(z, self.dt, axis=0)
 
         ensemble_optimizer = ps.EnsembleOptimizer(
-            opt=ps.STLSQ(threshold=self.threshold), bagging=True, n_models=self.n_models)
+            opt=ps.STLSQ(threshold=self.threshold, alpha=self.alpha),
+            bagging=True, n_models=self.n_models)
         sindy_model = ps.SINDy(
             optimizer=ensemble_optimizer, feature_library=ps.PolynomialLibrary(degree=self.degree))
         sindy_model.fit(z, t=self.dt, x_dot=z_dot)

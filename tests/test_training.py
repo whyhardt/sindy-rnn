@@ -40,7 +40,7 @@ def test_linear_system_recovery():
         warmup_steps=100,
         pruning_threshold=0.005,
         learning_rate=1e-2,
-        l2=1e-5,
+        lambda_s=1e-5,
         centered_diff=False,  # dt=1.0: forward diff is exact for Euler
         verbose=False,
     )
@@ -90,7 +90,7 @@ def test_sparsity_on_linear_system():
         warmup_steps=100,
         pruning_threshold=0.005,
         learning_rate=1e-2,
-        l2=1e-4,
+        lambda_s=1e-4,
         centered_diff=False,  # dt=1.0: forward diff is exact for Euler
         verbose=False,
     )

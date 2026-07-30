@@ -29,8 +29,8 @@ def main():
     data = generate_or_load_data(cfg)
     z = data['noisy_train']
 
-    est = StlsqEstimator(threshold=scfg['threshold'], n_models=scfg['n_models'],
-                         degree=2, dt=lcfg['dt'])
+    est = StlsqEstimator(threshold=scfg['threshold'], alpha=scfg['alpha'],
+                         n_models=scfg['n_models'], degree=2, dt=lcfg['dt'])
     est.fit(z)
 
     n_active = int(np.count_nonzero(est.coef_matrix))

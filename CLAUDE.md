@@ -146,7 +146,7 @@ For E=1, `threshold_patience_update()` increments patience for `|coef| < thresho
 
 Single-stage training:
 1. **MSE loss** on teacher-forced next-state prediction (NaN-masked for variable-length sequences)
-2. **L1 penalty on unfolded θ** — `l2 * theta.abs().mean()` (not AdamW weight decay). Plain Adam optimizer.
+2. **L2 penalty on unfolded θ** — `l2 * theta.pow(2).mean()` (not AdamW weight decay). Plain Adam optimizer.
 3. **Periodic pruning** via agreement/median test or threshold fallback
 
 **Teacher forcing is essential** — free-running from initial_state causes zero gradients when initial polynomial is near-zero.
@@ -211,7 +211,7 @@ E=ensemble, B=batch, T=timesteps, n=n_states, m=n_controls, F=n_features=n+m, C=
 12. **Accumulation safety** — `mult_table` guarantees unique targets per (source, feature)
 13. **Pruning is `torch.no_grad()`**
 14. **Teacher forcing essential** — free-running causes zero gradients
-15. **L1 on unfolded θ, not AdamW** — penalizes polynomial terms, not raw weights
+15. **L2 on unfolded θ, not AdamW** — penalizes polynomial terms, not raw weights
 16. **Theta caching** — `unfold_polynomial_coefficients()` called once before timestep loop
 17. **Median/agreement pruning for bifurcation** — E=10+ can bifurcate due to multicollinearity
 18. **Backward compat in load()** — `strict=False`, defaults for missing keys (`dt=1.0`, `decomposed=False`, `direct=False`)
@@ -230,7 +230,7 @@ E=ensemble, B=batch, T=timesteps, n=n_states, m=n_controls, F=n_features=n+m, C=
 - **Centered differences** (`centered_diff=True`, default): `dh/dt ≈ (h[t+1] - h[t-1]) / (2*dt)` for O(dt²) accuracy. Forward differences (`centered_diff=False`) have O(dt) error, causing ~10% coefficient bias on Lorenz.
 - **High learning rate** (`lr=5e-2`): ODE coefficients are O(10–28) (e.g., σ=10, ρ=28). At `lr=1e-2`, Adam takes ~2800 epochs to reach them. `5e-2` converges in ~500 epochs.
 - **Gradient clipping** (`max_norm=100.0`): Derivative-scale losses produce gradients ~100x larger than next-step losses. Old `max_norm=1.0` throttled learning by ~1000x.
-- **L1 on unfolded θ** (`l2=5e-2`): Drives sparsity. Named `l2` in `fit()` for legacy reasons — it's actually L1 on `theta.abs().mean()`.
+- **L2 on unfolded θ** (`l2=5e-2`): Drives sparsity via coefficient shrinkage toward zero (no exact-zero bias like L1 — pruning's threshold test does the exact-zero work).
 - **Batched windows** (`window_size=100`): Long trajectories chunked into non-overlapping windows for GPU parallelism.
 - **Sub-stepping** (`num_euler_steps=3`): Multiple Euler steps per dt interval improves integration accuracy during teacher-forced forward pass.
 - **dynamics_weight=0**: Disables autonomous rollout loss. Derivative matching alone is sufficient for direct state observation.
@@ -287,7 +287,7 @@ fit(model, xs, ys,
     pruning_method='agreement',
     pruning_frequency=100,
     learning_rate=5e-2,
-    l2=5e-2,              # L1 penalty weight
+    l2=5e-2,              # L2 penalty weight
     refit_epochs=500,
     dynamics_weight=0,    # derivative matching only, no autonomous rollout
     verbose=True,
@@ -414,23 +414,7 @@ live `SINDySHRED` object at all.
 ### 14.2 Lorenz
 
 Fully observed (no sparse sensors) — two alternative training objectives,
-both on the identical noisy trajectory (config.yaml + data.py).
-
-**All three methods train on states normalized by `data.compute_scale()`**
-(per-state std, computed from the clean reference trajectory) — deliberately
-*scale-only*, no mean-centering. Lorenz's `x, y` are ~zero-mean but `z` has a
-strongly nonzero mean (≈ρ-1, the attractor's center); centering `z` would
-introduce spurious constant/cross terms into the true ODE that don't exist
-in the raw system, corrupting `TRUE_ACTIVE`. Scale-only preserves the exact
-structure — `data.rescale_coefficients(coef_matrix, scale, degree)`
-transforms coefficients between the raw frame and the `z' = z/scale` frame
-(call with `1/scale` to invert) without ever changing which terms are zero.
-`analyze.py` converts every method's coefficients/forecasts back to raw
-units before comparing against `TRUE_COEFS`/`clean_test`. **Caveat:**
-`pruning_threshold`/STLSQ `threshold` are still tuned for the old raw-unit
-coefficient scale — since normalization changes the coefficients' natural
-magnitude, these may need retuning (observed empirically: STLSQ found 16
-spurious terms instead of the true 7 at the pre-normalization threshold).
+both on the identical noisy trajectory (config.yaml + data.py):
 
 1. **Derivative matching** (`train_sindy_rnn.py`): direct application of
    `PolynomialRNN` + `fit()`, matching §10. Compares `P(h)` to empirical
@@ -504,8 +488,14 @@ to the rollout objective.)
 400×1000 (~1GB). Train/test split and all hyperparameters are in
 [examples/cylinder/config.yaml](examples/cylinder/config.yaml).
 
-**GPU memory:** SINDy-SHRED decoder ~160M params. Must `.cpu()` and
+**GPU memory:** SINDy-SHRED decoder ~160M params. `RolloutSINDyRNN`'s
+decoder now mirrors SINDy-SHRED's shallow decoder network architecture
+(`dec_l1=350`, `dec_l2=400` hidden ReLU layers, same dropout as the GRU
+encoder — see `rollout.py`), so it carries a comparable parameter count at
+full (non-downsampled) resolution. Must `.cpu()` and
 `torch.cuda.empty_cache()` between methods if running both in one process.
+See `examples/cylinder/data.py`'s `downsample` config option if this
+doesn't fit on a smaller GPU.
 
 ### 14.4 SST
 

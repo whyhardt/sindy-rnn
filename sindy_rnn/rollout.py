@@ -9,8 +9,10 @@ Trained end-to-end with per-step reconstruction loss and a rollout-length
 curriculum that gradually increases the forecast horizon. The curriculum
 prevents the optimizer from needing to stabilize long rollouts from scratch.
 
-The decoder is deliberately linear, forcing the latent space to carry
-physical structure rather than letting a nonlinear decoder absorb dynamics.
+The decoder mirrors SINDy-SHRED's "shallow decoder network": two hidden
+ReLU layers (dec_l1, dec_l2) with the same dropout as the GRU encoder, then
+a final linear projection to n_full. Nonlinear, so the latent space is not
+forced to be a linear (POD-like) coordinate system of the full field.
 
 Identity mode (`identity=True`, requires n_sensors == n_latent == n_full):
 skips the encoder/decoder entirely so z IS the observed state. This applies
@@ -26,17 +28,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from tqdm import tqdm
 
 from .model import PolynomialRNN
 
 
 class RolloutSINDyRNN(nn.Module):
-    """GRU encoder -> autonomous polynomial rollout -> linear decoder.
+    """GRU encoder -> autonomous polynomial rollout -> SHRED-style decoder.
 
     The GRU encoder processes a warmup window of sparse sensor observations
     to produce an initial latent state z_0. The polynomial dynamics propagates
-    z_0 forward autonomously, and a linear decoder reconstructs the full field
-    at every rollout step.
+    z_0 forward autonomously, and a 2-hidden-layer decoder (matching SINDy-
+    SHRED's shallow decoder network) reconstructs the full field at every
+    rollout step.
 
     Encoder and decoder are shared; only the polynomial dynamics has E
     independent ensemble members.
@@ -54,8 +58,11 @@ class RolloutSINDyRNN(nn.Module):
         decomposed: use decomposed polynomial parameterization
         direct: use direct polynomial parameterization
         encoder_dropout: dropout for the GRU encoder (only has an effect
-            when gru_layers > 1 — torch.nn.GRU's own inter-layer dropout).
-            Ignored when identity=True (no encoder).
+            when gru_layers > 1 — torch.nn.GRU's own inter-layer dropout)
+            AND for the decoder's two hidden layers (always active there).
+            Ignored when identity=True (no encoder/decoder).
+        dec_l1: decoder's first hidden layer width (SINDy-SHRED default: 350)
+        dec_l2: decoder's second hidden layer width (SINDy-SHRED default: 400)
         identity: if True, skip the GRU encoder and decoder — z IS the
             observed state. Requires n_sensors == n_latent == n_full.
     """
@@ -70,7 +77,8 @@ class RolloutSINDyRNN(nn.Module):
         dt: float = 1.0,
         num_euler_steps: int = 1,
         gru_layers: int = 1,
-        dec_layers: int = 1,
+        dec_l1: int = 350,
+        dec_l2: int = 400,
         state_names: Optional[List[str]] = None,
         decomposed: bool = True,
         direct: bool = False,
@@ -117,9 +125,18 @@ class RolloutSINDyRNN(nn.Module):
             num_euler_steps=num_euler_steps,
         )
 
-        # Linear decoder (deliberately simple — prevents decoder absorbing dynamics)
-        # Skipped when identity=True — z IS the full state.
-        self.decoder = nn.Identity() if identity else nn.Linear(n_latent, n_full)
+        # SHRED-style shallow decoder network: Linear -> Dropout -> ReLU,
+        # twice, then a final linear projection. Skipped when identity=True
+        # — z IS the full state.
+        self.decoder = nn.Identity() if identity else nn.Sequential(
+            nn.Linear(n_latent, dec_l1),
+            nn.Dropout(encoder_dropout),
+            nn.ReLU(),
+            nn.Linear(dec_l1, dec_l2),
+            nn.Dropout(encoder_dropout),
+            nn.ReLU(),
+            nn.Linear(dec_l2, n_full),
+        )
         
         # Running z normalization between encoder and dynamics.
         # Polynomial always sees standardized z (≈ mean 0, std 1).
@@ -275,6 +292,7 @@ class RolloutSINDyRNN(nn.Module):
         self,
         x_sparse_warmup: Tensor,
         n_steps: int,
+        reduction: str = 'mean',
     ) -> tuple:
         """Forecast from a warmup window (no per-step supervision).
 
@@ -285,6 +303,10 @@ class RolloutSINDyRNN(nn.Module):
         Args:
             x_sparse_warmup: (B, T_w, n_sensors)
             n_steps: number of forecast steps
+            reduction: 'mean' (default) averages the decoded reconstruction
+                over the dynamics ensemble. 'best' instead decodes only the
+                single member at dyn.best_member_idx (set by
+                select_best_member() — see rollout.select_best_member).
 
         Returns:
             x_hat: (B, n_steps, n_full) — decoded forecast (excludes initial z_0)
@@ -306,7 +328,10 @@ class RolloutSINDyRNN(nn.Module):
 
             # Denormalize before decoding
             z_raw = self._denormalize_z(z_traj)
-            x_hat = self.decoder(z_raw.mean(0))  # (B, n_steps, n_full)
+            if reduction == 'best':
+                x_hat = self.decoder(z_raw[dyn.best_member_idx])  # (B, n_steps, n_full)
+            else:
+                x_hat = self.decoder(z_raw.mean(0))  # (B, n_steps, n_full)
 
         return x_hat, z_traj
 
@@ -364,20 +389,26 @@ class RolloutSINDyRNN(nn.Module):
         """Return autonomous dynamics (refit) if available, else dynamics."""
         return getattr(self, 'autonomous_dynamics', self.dynamics)
 
-    def get_equations(self) -> str:
-        return self._eq_dynamics.get_equations()
+    def get_equations(self, member: Optional[int] = None) -> str:
+        return self._eq_dynamics.get_equations(member=member)
 
-    def get_continuous_equations(self, dt: float = None) -> str:
-        return self._eq_dynamics.get_continuous_equations(dt)
+    def get_continuous_equations(self, dt: float = None, member: Optional[int] = None) -> str:
+        return self._eq_dynamics.get_continuous_equations(dt, member=member)
 
-    def get_coefficients(self, aggregate=True) -> Dict[str, Tensor]:
-        return self._eq_dynamics.get_coefficients(aggregate=aggregate)
+    def get_coefficients(self, aggregate=True, member: Optional[int] = None) -> Dict[str, Tensor]:
+        return self._eq_dynamics.get_coefficients(aggregate=aggregate, member=member)
 
-    def count_active_terms(self) -> Dict[str, int]:
-        return self._eq_dynamics.count_active_terms()
+    def count_active_terms(self, member: Optional[int] = None) -> Dict[str, int]:
+        return self._eq_dynamics.count_active_terms(member=member)
 
-    def print_equations(self):
-        self._eq_dynamics.print_equations()
+    def print_equations(self, member: Optional[int] = None):
+        self._eq_dynamics.print_equations(member=member)
+
+    @property
+    def best_member_idx(self):
+        """Index set by rollout.select_best_member() on the active dynamics
+        module — the same member simulate() uses when simulate='best'."""
+        return self._eq_dynamics.best_member_idx
 
     def save(self, path: str):
         """Save model weights + constructor config.
@@ -398,6 +429,8 @@ class RolloutSINDyRNN(nn.Module):
                 'dt': self.dynamics.rnn._dt.item(),
                 'num_euler_steps': self.dynamics.rnn._num_euler_steps,
                 'gru_layers': 1 if self.encoder is None else self.encoder.num_layers,
+                'dec_l1': None if self.identity else self.decoder[0].out_features,
+                'dec_l2': None if self.identity else self.decoder[3].out_features,
                 'state_names': self.dynamics.state_names,
                 'decomposed': self.dynamics.rnn._decomposed,
                 'direct': self.dynamics.rnn._direct,
@@ -445,12 +478,15 @@ def fit_rollout(
     learning_rate: float = 1e-3,
     lambda_0: float = 1e-3,
     lambda_s: float = 1e-3,
+    weight_decay: float = 0.,
     grad_clip: float = 0.5,
     batches_per_epoch: int = 4,
     pruning_threshold: float = 0.1,
     pruning_frequency: int = 100,
     pruning_method: str = 'agreement',
     agreement_frac: float = 0.5,
+    ladder_exponent_step: float = 0.2,
+    ladder_offset: float = -1.0,
     lr_patience: int = 0,
     lr_factor: float = 0.5,
     min_lr: float = 1e-6,
@@ -476,7 +512,7 @@ def fit_rollout(
     Curriculum schedule:
         T_cur(epoch) = min(T_max, T_start + floor(epoch / E_step) * delta_T)
 
-    Sparsity (L1 + pruning) activates only after the curriculum reaches T_max,
+    Sparsity (L2 + pruning) activates only after the curriculum reaches T_max,
     avoiding the moving-target problem from premature sparsification.
 
     Args:
@@ -492,22 +528,33 @@ def fit_rollout(
         batch_size: mini-batch size
         learning_rate: Adam learning rate
         lambda_0: z_0 norm regularization weight
-        lambda_s: L1 sparsity weight on theta (after curriculum completes)
+        lambda_s: L2 sparsity weight on theta (after curriculum completes)
+        weight_decay: AdamW weight decay applied to all model parameters,
+            including the dynamics/polynomial params (raw, pre-unfolding
+            weights under the factored/decomposed parameterizations — this
+            is on top of, not instead of, lambda_s directly on theta).
+            0 = off (default).
         grad_clip: gradient clip norm
         batches_per_epoch: max mini-batches per epoch (stride-1 windows are
             heavily redundant; 2-8 batches per epoch is typically sufficient)
         pruning_threshold: pruning threshold delta
         pruning_frequency: epochs between pruning (after sparsity activation)
-        pruning_method: 'median' or 'agreement'
+        pruning_method: 'median', 'agreement', or 'ladder' (per-member
+            geometric threshold ladder, no cross-member vote — see
+            pruning.ladder_threshold_test)
         agreement_frac: fraction of active ensemble members that must
             individually exceed pruning_threshold. Only used for method='agreement'.
+        ladder_exponent_step, ladder_offset: only used for
+            pruning_method='ladder'. Member e's threshold is
+            pruning_threshold * 10 ** (ladder_exponent_step * e +
+            ladder_offset). Defaults mirror SINDy-SHRED's E_SINDy.thresholding().
         lr_patience: ReduceLROnPlateau patience (0 = no scheduler)
         lr_factor: LR reduction factor on plateau
         min_lr: minimum learning rate
         refit_epochs: additional epochs at T_max with lambda_s=0, the mask
             frozen, and the encoder/decoder frozen. Debiases the dynamics
             coefficients for the already-discovered structure, which would
-            otherwise stay shrunk by the ongoing L1 penalty. Continues the
+            otherwise stay shrunk by the ongoing L2 penalty. Continues the
             same trajectory-matching objective (unlike refit_rollout(),
             which switches to derivative matching — that would undo the
             noise-robustness of trajectory matching in identity mode).
@@ -520,6 +567,7 @@ def fit_rollout(
     """
     from .pruning import (
         ensemble_prune, threshold_patience_update, threshold_prune,
+        compute_prune_budget,
     )
 
     N_time = x_sparse_all.shape[0]
@@ -535,7 +583,18 @@ def fit_rollout(
     n_steps_to_max = max(0, (T_max - T_start + delta_T - 1) // delta_T)
     sparsity_start_epoch = n_steps_to_max * E_step
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    # Fixed per-event pruning budget: total active terms / total scheduled
+    # pruning events, computed once up front so a single noisy early event
+    # can't wipe out most of the model — see pruning.compute_prune_budget.
+    n_pruning_events = sum(
+        1 for e in range(sparsity_start_epoch, epochs)
+        if pruning_frequency > 0 and e % pruning_frequency == 0
+    )
+    n_active_terms = int(model.dynamics.coefficient_masks.any(dim=0).sum().item())
+    max_prune = compute_prune_budget(n_active_terms, n_pruning_events)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = None
     if lr_patience > 0:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -546,20 +605,35 @@ def fit_rollout(
         print(f"Rollout curriculum training ({epochs} epochs)")
         print(f"  T_w={T_w}, T_start={T_start}, T_max={T_max}, "
               f"delta_T={delta_T}, E_step={E_step}")
-        print(f"  Sparsity activates at epoch {sparsity_start_epoch}")
+        print(f"  Pruning activates at epoch {sparsity_start_epoch}")
+        print(f"  Pruning maximum {max_prune} terms per pruning event "
+              f"({n_pruning_events} events, {n_active_terms} active terms)")
         print(f"  lr={learning_rate:.1e}, lambda_0={lambda_0:.1e}, "
-              f"lambda_s={lambda_s:.1e}, grad_clip={grad_clip}")
+              f"lambda_s={lambda_s:.1e}, weight_decay={weight_decay:.1e}, "
+              f"grad_clip={grad_clip}")
         print(f"  N_time={N_time}, batch_size={batch_size}, "
               f"batches_per_epoch={batches_per_epoch}")
 
+    prev_T_cur = None
+    last_test_loss = None
+    epoch_iter = tqdm(range(epochs), desc="Rollout training", disable=not verbose)
     try:
-        for epoch in range(epochs):
+        for epoch in epoch_iter:
             model.train()
 
             # Curriculum: current rollout length
             T_cur = min(T_max, T_start + (epoch // E_step) * delta_T)
             span = T_w + T_cur  # total frames needed per sample
             use_sparsity = (epoch >= sparsity_start_epoch)
+
+            # A curriculum step changes the training tensor shape, leaving
+            # the old shape's cached blocks stranded (unusable for the new
+            # size) in PyTorch's CUDA caching allocator. Defragment on each
+            # step rather than letting stale blocks pile up across the run.
+            if T_cur != prev_T_cur:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                prev_T_cur = T_cur
 
             # Valid starting indices for this T_cur
             max_start = N_time - span
@@ -597,16 +671,22 @@ def fit_rollout(
                 # Per-step reconstruction loss
                 L_rec = F.mse_loss(x_hat, x_targets)
 
-                # z_0 regularization (keeps encoder output bounded)
-                L_z0 = lambda_0 * (z_traj[:, :, 0] ** 2).mean()
+                # z_0 regularization (keeps encoder output bounded). Scaled
+                # by E so per-member penalty strength is independent of
+                # ensemble_size — plain .mean() over (E, B, n_latent) would
+                # otherwise dilute the penalty by 1/E as E grows.
+                E = z_traj.shape[0]
+                L_z0 = lambda_0 * E * (z_traj[:, :, 0] ** 2).mean()
 
-                # L1 sparsity on polynomial coefficients (always active)
+                # L2 sparsity on polynomial coefficients (always active).
+                # Same E-scaling: penalizes each ensemble member's theta at
+                # full lambda_s strength regardless of ensemble_size.
                 L_sp = 0.
                 if lambda_s > 0:
                     theta = model.dynamics.rnn.unfold_polynomial_coefficients()
-                    L_sp = lambda_s * (
+                    L_sp = lambda_s * theta.shape[0] * (
                         theta * model.dynamics.coefficient_masks.float()
-                    ).abs().mean()
+                    ).pow(2).mean()
 
                 loss = L_rec + L_z0 + L_sp
 
@@ -619,8 +699,8 @@ def fit_rollout(
                     # instead and let training continue from the last good
                     # state — mirrors sindy_shred_net.py's own safeguard.
                     if verbose:
-                        print(f"  Non-finite loss at epoch {epoch}, batch {bi}: "
-                              f"skipping optimization step")
+                        tqdm.write(f"  Non-finite loss at epoch {epoch}, batch {bi}: "
+                                   f"skipping optimization step")
                     optimizer.zero_grad(set_to_none=True)
                     continue
 
@@ -646,17 +726,20 @@ def fit_rollout(
                             ensemble_prune(
                                 model.dynamics, delta=pruning_threshold,
                                 method=pruning_method,
-                                agreement_frac=agreement_frac)
+                                agreement_frac=agreement_frac,
+                                ladder_exponent_step=ladder_exponent_step,
+                                ladder_offset=ladder_offset,
+                                max_prune=max_prune)
                         else:
                             threshold_patience_update(
                                 model.dynamics,
                                 threshold=pruning_threshold)
-                            threshold_prune(model.dynamics)
+                            threshold_prune(model.dynamics, max_prune=max_prune)
 
-            # Logging
-            if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
-                avg_rec = epoch_rec_loss / n_batches
-                avg_tot = epoch_total_loss / n_batches
+            # Logging: postfix, including validation eval, updates every epoch.
+            if verbose:
+                avg_rec = epoch_rec_loss / max(n_batches, 1)
+                avg_tot = epoch_total_loss / max(n_batches, 1)
 
                 # Latent norm diagnostic (average ||z_t|| over trajectory)
                 with torch.no_grad():
@@ -664,22 +747,41 @@ def fit_rollout(
                     z_norms = z_traj.mean(0).norm(dim=-1).mean().item()
 
                 lr_now = optimizer.param_groups[0]['lr']
-                msg = (f"Epoch {epoch:5d} | T_cur={T_cur:3d} | "
-                       f"rec={avg_rec:.6f} | total={avg_tot:.6f} | "
-                       f"|z|={z_norms:.3f} | lr={lr_now:.1e}")
+                active = model.count_active_terms()
+                postfix = {
+                    'T_cur': T_cur,
+                    'rec': f'{avg_rec:.6f}',
+                    'total': f'{avg_tot:.6f}',
+                    'lr': f'{lr_now:.1e}',
+                    'terms': sum(active.values()),
+                    '|z|': f'{z_norms:.3f}',
+                }
 
-                if use_sparsity:
-                    active = model.count_active_terms()
-                    msg += f" | terms={sum(active.values())}"
+                # Magnitude of present (unmasked) coefficients — diagnoses
+                # penalty shrinkage / bifurcation independent of term count.
+                with torch.no_grad():
+                    theta = model.dynamics.rnn.unfold_polynomial_coefficients()
+                    theta_active = theta[model.dynamics.coefficient_masks].abs()
+                    if theta_active.numel() > 0:
+                        postfix['|c|_max'] = f'{theta_active.max().item():.3f}'
+                        postfix['|c|_mean'] = f'{theta_active.mean().item():.3f}'
 
-                # Test evaluation at T_max (stress test)
+                # Validation evaluation at T_max (stress test). Defragment
+                # before and after — this forces one large contiguous
+                # allocation at a size training itself may not have used yet.
                 if x_sparse_test is not None and x_full_test is not None:
-                    test_loss = _eval_test(
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    last_test_loss = _eval_test(
                         model, x_sparse_test, x_full_test, T_w, T_max,
                         batch_size)
-                    msg += f" | test={test_loss:.6f}"
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
-                print(msg)
+                if last_test_loss is not None:
+                    postfix['val'] = f'{last_test_loss:.6f}'
+
+                epoch_iter.set_postfix(postfix)
 
     except KeyboardInterrupt:
         if verbose:
@@ -699,6 +801,11 @@ def fit_rollout(
 
         refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate / 5
         refit_optimizer = torch.optim.AdamW(model.dynamics.parameters(), lr=refit_lr)
+        refit_scheduler = None
+        if lr_patience > 0:
+            refit_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                refit_optimizer, mode='min', factor=lr_factor,
+                patience=lr_patience, min_lr=min_lr)
 
         if verbose:
             active = model.count_active_terms()
@@ -710,8 +817,9 @@ def fit_rollout(
         span = T_w + T_cur
         max_start = N_time - span
 
+        refit_iter = tqdm(range(refit_epochs), desc="Refit", disable=not verbose)
         try:
-            for r_epoch in range(refit_epochs):
+            for r_epoch in refit_iter:
                 model.train()
 
                 n_samples = min(max_start, batches_per_epoch * batch_size)
@@ -735,8 +843,8 @@ def fit_rollout(
 
                     if not torch.isfinite(loss):
                         if verbose:
-                            print(f"  Non-finite loss in refit epoch {r_epoch}: "
-                                  f"skipping optimization step")
+                            tqdm.write(f"  Non-finite loss in refit epoch {r_epoch}: "
+                                       f"skipping optimization step")
                         refit_optimizer.zero_grad(set_to_none=True)
                         continue
 
@@ -748,23 +856,116 @@ def fit_rollout(
                     epoch_rec_loss += loss.item()
                     n_batches += 1
 
-                if verbose and (r_epoch % 50 == 0 or r_epoch == refit_epochs - 1):
-                    avg_rec = epoch_rec_loss / max(n_batches, 1)
-                    print(f"Refit {r_epoch:5d} | T_cur={T_cur:3d} | rec={avg_rec:.6f}")
+                avg_rec = epoch_rec_loss / max(n_batches, 1)
+                if refit_scheduler is not None:
+                    refit_scheduler.step(avg_rec)
+
+                if verbose:
+                    postfix = {
+                        'T_cur': T_cur, 'rec': f'{avg_rec:.6f}',
+                        'lr': f'{refit_optimizer.param_groups[0]["lr"]:.1e}',
+                    }
+                    with torch.no_grad():
+                        theta = model.dynamics.rnn.unfold_polynomial_coefficients()
+                        theta_active = theta[model.dynamics.coefficient_masks].abs()
+                        if theta_active.numel() > 0:
+                            postfix['|c|_max'] = f'{theta_active.max().item():.3f}'
+                            postfix['|c|_mean'] = f'{theta_active.mean().item():.3f}'
+                    refit_iter.set_postfix(postfix)
         except KeyboardInterrupt:
             if verbose:
                 print(f"\nRefit interrupted at epoch {r_epoch}.")
+
+    # Rank ensemble members by their own full-state reconstruction fit —
+    # predict()'s same-timestep reconstruction is identical across members
+    # (encode() broadcasts one shared z_0 to all E copies), so only the
+    # multi-step autonomous rollout differentiates them. Evaluated at T_max
+    # since that's the horizon simulate()/forecast() actually uses. Prefer
+    # held-out data when given — the training set alone would favor
+    # whichever member simply overfits hardest.
+    if x_sparse_test is not None and x_full_test is not None:
+        select_best_member(model, x_sparse_test, x_full_test, T_w, T_max, batch_size)
+    else:
+        select_best_member(model, x_sparse_all, x_full_all, T_w, T_max, batch_size)
 
     if verbose:
         print("\nDiscovered equations:")
         model.print_equations()
 
 
+def select_best_member(model: RolloutSINDyRNN, x_sparse_all: Tensor,
+                       x_full_all: Tensor, T_w: int, T_eval: int,
+                       batch_size: int = 32, n_windows: int = 50):
+    """Evaluate each ensemble member's own autonomous-rollout reconstruction
+    fit on training data and store the best (lowest-MSE) member's index on
+    the active dynamics module (model._eq_dynamics.best_member_idx).
+
+    Mirrors forward()'s/forecast()'s rollout + decode mechanics but skips
+    the .mean(0) ensemble reduction, so every member's decoded
+    reconstruction is scored independently. Called once at the end of
+    fit_rollout()/refit_rollout() so analyze.py can switch between the
+    ensemble mean and this single best-fitting member (config
+    `simulate: mean|best`) without retraining.
+    """
+    model.eval()
+    dyn = model._eq_dynamics
+    device = next(model.parameters()).device
+    E = model.ensemble_size
+    N = x_sparse_all.shape[0]
+    span = T_w + T_eval
+    max_start = N - span
+    if max_start < 1:
+        return
+
+    n_windows = min(max_start, n_windows)
+    starts = torch.linspace(0, max_start - 1, n_windows).long()
+
+    total_se = torch.zeros(E, device=device)
+    total_n = 0
+
+    with torch.no_grad():
+        for bi in range(0, len(starts), batch_size):
+            s_batch = starts[bi:bi + batch_size]
+            x_warmup = torch.stack(
+                [x_sparse_all[s:s + T_w] for s in s_batch]).to(device)
+            x_targets = torch.stack(
+                [x_full_all[s + T_w - 1:s + T_w - 1 + T_eval + 1]
+                 for s in s_batch]).to(device)
+
+            z = model.encode(x_warmup)  # (E, B, n_latent)
+            if dyn is not model.dynamics:
+                # autonomous_dynamics (post-refit) was fit on normalized z —
+                # mirrors forecast()'s explicit normalize call.
+                z = model._normalize_z(z)
+
+            theta = dyn.rnn.unfold_polynomial_coefficients()
+            theta_masked = theta * dyn.coefficient_masks.float()
+            z_stack = model._rollout(z, T_eval, theta_masked, include_init=True)
+            z_raw = model._denormalize_z(z_stack)
+            x_hat = model.decoder(z_raw)  # (E, B, T_eval+1, n_full)
+
+            se = (x_hat - x_targets.unsqueeze(0)) ** 2
+            total_se += se.sum(dim=(1, 2, 3))
+            total_n += x_hat[0].numel()
+
+    model.train()
+    if total_n > 0:
+        member_loss = total_se / total_n
+        dyn.best_member_idx.fill_(int(torch.argmin(member_loss).item()))
+
+
 def _eval_test(model, x_sparse_test, x_full_test, T_w, T_max, batch_size):
-    """Evaluate reconstruction loss on test time series at T_max rollout."""
+    """Evaluate reconstruction loss on held-out time series, rolled out as
+    far as T_max or the available data allows, whichever is shorter (the
+    held-out series passed in for training-time monitoring — typically a
+    validation buffer — may be much shorter than T_max, which also doubles
+    as the curriculum target)."""
     model.eval()
     device = next(model.parameters()).device
     N_test = x_sparse_test.shape[0]
+    T_max = min(T_max, N_test - T_w - 1)
+    if T_max < 1:
+        return float('nan')
     span = T_w + T_max
     max_start = N_test - span
     if max_start < 1:
@@ -806,6 +1007,8 @@ def refit_rollout(
     refit_pruning_frequency: int = 100,
     refit_pruning_method: str = 'agreement',
     agreement_frac: float = 0.5,
+    ladder_exponent_step: float = 0.2,
+    ladder_offset: float = -1.0,
     centered_diff: bool = True,
     include_bias: bool = True,
     interaction_only: bool = False,
@@ -825,13 +1028,16 @@ def refit_rollout(
         T_w: warmup window length used during Stage 1
         refit_epochs: epochs for derivative matching
         refit_learning_rate: Adam lr for polynomial fitting
-        refit_l2: L1 penalty on polynomial coefficients
+        refit_l2: L2 penalty on polynomial coefficients
         refit_pruning_threshold: pruning threshold delta
         refit_pruning_frequency: epochs between pruning
-        refit_pruning_method: 'median' or 'agreement'
+        refit_pruning_method: 'median', 'agreement', or 'ladder' (per-member
+            geometric threshold ladder, no cross-member vote)
         agreement_frac: fraction of active ensemble members that must
             individually exceed refit_pruning_threshold. Only used for
             refit_pruning_method='agreement'.
+        ladder_exponent_step, ladder_offset: only used for
+            refit_pruning_method='ladder'. See training.fit().
         centered_diff: use centered differences for derivative estimation
         include_bias: include constant term in library
         interaction_only: exclude pure power terms
@@ -886,18 +1092,20 @@ def refit_rollout(
 
     if verbose:
         print(f"  Fitting dz/dt = P(z) with lr={refit_learning_rate:.1e}, "
-              f"L1={refit_l2:.1e}, threshold={refit_pruning_threshold}")
+              f"L2={refit_l2:.1e}, threshold={refit_pruning_threshold}")
 
     _fit_dynamics(
         model.autonomous_dynamics, xs_latent, ys_latent,
         epochs=refit_epochs,
         warmup_steps=0,
         learning_rate=refit_learning_rate,
-        l2=refit_l2,
+        lambda_s=refit_l2,
         pruning_threshold=refit_pruning_threshold,
         pruning_method=refit_pruning_method,
         pruning_frequency=refit_pruning_frequency,
         agreement_frac=agreement_frac,
+        ladder_exponent_step=ladder_exponent_step,
+        ladder_offset=ladder_offset,
         include_bias=include_bias,
         interaction_only=interaction_only,
         centered_diff=centered_diff,
