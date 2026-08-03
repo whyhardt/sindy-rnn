@@ -447,19 +447,59 @@ SST, and Lorenz identity mode):**
   otherwise permanently corrupt every weight for the rest of training
   (mirrors `sindy_shred_net.py`'s own "Non-finite loss encountered;
   skipping optimization step" safeguard).
-- **`refit_epochs`/`refit_learning_rate`:** once pruning finds the sparse
-  structure, `lambda_s` continuing to apply for the rest of training keeps
-  shrinking/biasing the surviving coefficients (same penalty-shrinkage
-  problem `fit()`'s own `refit_epochs` exists to fix). `fit_rollout()` now
-  supports the same pattern: additional epochs at the final `T_cur` with
-  `lambda_s=0`, the mask frozen, and — unlike `fit()`, which has nothing to
-  freeze — **the encoder and decoder frozen too**, so the dynamics aren't
-  debiasing against a shifting `z`. This is a different refit than
-  `refit_rollout()` (Stage 2, below): it keeps the same trajectory-matching
-  objective, where `refit_rollout()` switches to derivative matching on the
-  extracted latent trajectory — which would undo the noise-robustness
-  benefit of trajectory matching in identity mode, since `z` there is the
-  raw noisy observed state.
+- **`fit_rollout()` itself is a plain, stage-agnostic single-stage trainer**
+  (one rollout-length curriculum from `T_start` to `T_max`, one optimizer,
+  one pass over `epochs`). It has no knowledge of "stages" — that
+  orchestration lives one level up, in `RolloutSINDyRNNEstimator.fit()`
+  ([examples/_common/estimators.py](examples/_common/estimators.py)),
+  which calls it up to three times in a row on the same `model`:
+  - **Stage 1**: `fit_rollout()` with `fit_kwargs` as configured — joint
+    encoder/decoder + SINDy training.
+  - **Stage 2.1** (`refit_discovery_epochs>0`): Stage 1's pruning votes and
+    coefficient values were both shaped while the encoder/decoder were
+    still moving, so neither is trustworthy once they freeze. The
+    estimator freezes encoder/decoder, resets the mask to all-active and
+    the dynamics coefficients to a fresh init
+    (`PolynomialRNN.reset_masks()`/`reset_dynamics_parameters()`), then
+    calls `fit_rollout()` again — same `T_w`/`T_max`/`T_start`/`delta_T`
+    curriculum and the same `lambda_s`/`weight_decay`/pruning schedule as
+    Stage 1, just `epochs=refit_discovery_epochs` (with `E_step=None` so
+    the curriculum ramp is recomputed for that shorter budget instead of
+    inheriting Stage 1's `E_step`, which would either never reach `T_max`
+    or reach it instantly) and a lower `learning_rate` (`refit_learning_rate`,
+    default `learning_rate / 5`) — rediscovering structure against the
+    now-stable `z`.
+  - **Stage 2.2** (`refit_debias_epochs>0`): resets the coefficients again
+    (keeping whatever mask Stage 2.1 left, or Stage 1's mask directly if
+    `refit_discovery_epochs=0`), then calls `fit_rollout()` a third time
+    with `lambda_s=weight_decay=0` and `pruning_threshold=0` (disables
+    pruning entirely, so the mask stays frozen) — an unbiased refit on
+    fixed structure, analogous to an OLS refit after lasso support
+    selection (same penalty-shrinkage problem `fit()`'s own `refit_epochs`
+    exists to fix, one step further). `lambda_0` is forced to 0 in both
+    refit stages since the encoder is frozen — the `z_0` regularization
+    term would be a no-op gradient-wise but still print a misleading value.
+  - Each `fit_rollout()` call gets its own fresh `AdamW`/`ReduceLROnPlateau`
+    — no scheduler state carried between stages, since each optimizes a
+    different loss landscape at a different `T_cur` starting point.
+  - Neither refit stage skips straight to a `T_max`-length rollout despite
+    resetting coefficients to a random init — that would explode to
+    `inf`/`nan` on the very first forward pass (a random degree-D
+    polynomial integrated via forward Euler for `T_max` steps diverges
+    almost certainly), and since the non-finite-loss guard skips the
+    optimizer step on failure, the parameters would never move away from
+    the bad init that caused it — a permanent, epoch-after-epoch stuck
+    state, not a transient one. Each stage's own `fit_rollout()` call gets
+    the *same* `T_start`/`T_max`/`delta_T` curriculum as Stage 1, just
+    with `E_step` recomputed for its own shorter epoch budget — this is
+    exactly why the orchestration reuses `fit_rollout()` wholesale instead
+    of duplicating a second, curriculum-free training loop.
+  - `epochs=0` in Stage 1's `fit_kwargs` skips it entirely (the model must
+    already have trained weights, e.g. reloaded from a checkpoint) while
+    Stage 2.1/2.2 still run per their own epoch counts — `cylinder`/`sst`'s
+    `train_sindy_rnn.py` use this to resume refit-only on an existing
+    checkpoint with new `refit_*` settings without repeating Stage 1's
+    long training run.
 
 Baseline for both is STLSQ/E-SINDy (`pysindy`), not SINDy-SHRED, since
 SHRED's sparse-sensor premise doesn't apply to an already fully-observed

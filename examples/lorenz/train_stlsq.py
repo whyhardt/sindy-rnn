@@ -39,7 +39,7 @@ def main():
           f"{' (best member)' if est.simulate_mode == 'best' else ' (ensemble mean)'}")
 
     os.makedirs(PARAMS_DIR, exist_ok=True)
-    save_path = os.path.join(PARAMS_DIR, 'stlsq.npz')
+    save_path = os.path.join(PARAMS_DIR, scfg['path_model'])
     est.save(save_path)
     print(f"\n  Saved ensemble ({est.n_models} members) to {save_path}")
 

@@ -58,8 +58,13 @@ class EnsemblePolynomialLayer(nn.Module):
             nn.Parameter(torch.zeros(ensemble_size, output_size))
             for _ in range(degree)
         ])
+        self.reset_parameters()
+
+    def reset_parameters(self):
         for w in self.weights:
             nn.init.xavier_normal_(w, gain=1.0)
+        for b in self.biases:
+            nn.init.zeros_(b)
 
     def forward(self, x):
         # x: (E, B, n_features) -> output: (E, B, n_states)
@@ -106,7 +111,6 @@ class DecomposedPolynomialLayer(nn.Module):
         self.linear_weight = nn.Parameter(
             torch.empty(ensemble_size, output_size, input_size)
         )
-        nn.init.xavier_normal_(self.linear_weight, gain=1.0)
 
         # Degree d>=2: d independent weight matrices (bias-free linear forms)
         self.higher_degree_weights = nn.ModuleDict()
@@ -115,9 +119,16 @@ class DecomposedPolynomialLayer(nn.Module):
                 nn.Parameter(torch.empty(ensemble_size, output_size, input_size))
                 for _ in range(d)
             ])
+            self.higher_degree_weights[str(d)] = weights
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.zeros_(self.constant_bias)
+        nn.init.xavier_normal_(self.linear_weight, gain=1.0)
+        for weights in self.higher_degree_weights.values():
             for w in weights:
                 nn.init.xavier_normal_(w, gain=1.0)
-            self.higher_degree_weights[str(d)] = weights
 
     def forward(self, x: Tensor) -> Tensor:
         """Evaluate the decomposed polynomial.
@@ -242,6 +253,20 @@ class EnsembleRNNModule(nn.Module):
                 self._compiled_forward = None
                 self._compiled_unfold = None
                 self._compiled_evaluate_rhs = None
+
+    def reset_dynamics_parameters(self):
+        """Reinitialize polynomial coefficients from scratch, in place.
+
+        Used by refit stages that keep a discovered sparsity mask but want
+        an unbiased coefficient fit from a fresh initialization (avoids
+        carrying over shrinkage/bias accumulated under the discovery-phase
+        penalty). Masks/patience live on the owning PolynomialRNN, not here,
+        so this only touches the raw weights.
+        """
+        if self._direct:
+            nn.init.normal_(self.theta, std=0.01)
+        else:
+            self.projection.reset_parameters()
 
     def _forward_impl(self, h, u=None):
         """Core forward: num_euler_steps sub-steps of h += (dt/N) * P(h, u)."""
@@ -689,6 +714,24 @@ class PolynomialRNN(nn.Module):
         from .equations import get_coefficients
         return get_coefficients(self, aggregate=aggregate, member=member)
 
+    def reset_masks(self):
+        """Reset sparsity mask to all-active and clear pruning patience.
+
+        Used by refit stages that want pruning to re-vote from scratch
+        (e.g. against a newly-frozen encoder) instead of inheriting
+        decisions made against a moving target.
+        """
+        self.coefficient_masks.fill_(True)
+        self.pruning_patience.fill_(0)
+
+    def reset_dynamics_parameters(self):
+        """Reinitialize polynomial coefficients from scratch, in place.
+
+        Keeps the sparsity mask untouched — use reset_masks() separately
+        if a fresh mask is also wanted. See EnsembleRNNModule.reset_dynamics_parameters().
+        """
+        self.rnn.reset_dynamics_parameters()
+
     def count_active_terms(self, member: Optional[int] = None) -> Dict[str, int]:
         """Count active (unmasked) polynomial terms per state dimension.
 
@@ -736,7 +779,7 @@ class PolynomialRNN(nn.Module):
         self.train(was_training)
         return self.best_member_idx.item()
 
-    def select_best_member_bic(self, xs: Tensor, ys: Tensor) -> int:
+    def select_best_member_bic(self, xs: Tensor, ys: Tensor) -> Tensor:
         """Score each ensemble member by BIC on (xs, ys) and store the best
         (lowest-BIC) member's index in bic_member_idx.
 
@@ -752,7 +795,11 @@ class PolynomialRNN(nn.Module):
             ys: (B, T, n_states) — training targets
 
         Returns:
-            Index of the lowest-BIC ensemble member (also stored on the model).
+            ((E,) bic, (E,) mse) tensors of per-member scores (mirrors
+            rollout.select_best_member_bic()'s return value, used to print a
+            member/threshold/n_coef/mse/bic table — see
+            examples/lorenz/train_sindy_rnn.py). The lowest-BIC member's
+            index is also stored on the model (bic_member_idx).
         """
         was_training = self.training
         self.eval()
@@ -776,7 +823,7 @@ class PolynomialRNN(nn.Module):
             bic = n_frames * torch.log(mse) + k * torch.log(n_frames)
             self.bic_member_idx.fill_(int(torch.argmin(bic).item()))
         self.train(was_training)
-        return self.bic_member_idx.item()
+        return bic, mse
 
     def save(self, path: str):
         """Save model weights + sparsity masks + patience counters."""

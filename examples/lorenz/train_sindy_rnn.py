@@ -70,6 +70,10 @@ def main():
     est.fit(xs, ys)
     elapsed = time.time() - t0
 
+    bic_scores, mse_scores = est.model.select_best_member_bic(
+        torch.tensor(xs, dtype=torch.float32, device=DEVICE),
+        torch.tensor(ys, dtype=torch.float32, device=DEVICE))
+
     member = resolve_member(est)
     print(f"\n  Discovered equations{' (best member)' if member is not None else ''}:")
     est.model.print_equations(member=member)
@@ -77,8 +81,21 @@ def main():
     print(f"  Active terms: {sum(active.values())}")
     print(f"  Training time: {elapsed:.1f}s")
 
+    if rcfg.get('pruning_method') == 'ladder':
+        E = est.model.ensemble_size
+        exp_step = rcfg.get('ladder_exponent_step', 0.2)
+        offset = rcfg.get('ladder_offset', -1.0)
+        thresholds = [rcfg['pruning_threshold'] * 10 ** (exp_step * e + offset) for e in range(E)]
+        n_coefs = [sum(est.model.count_active_terms(member=e).values()) for e in range(E)]
+        print("\n  Pruning ladder:")
+        print("  member   |" + "".join(f"{e:>10d}" for e in range(E)))
+        print("  threshold|" + "".join(f"{t:>10.2e}" for t in thresholds))
+        print("  n_coef   |" + "".join(f"{n:>10d}" for n in n_coefs))
+        print("  mse      |" + "".join(f"{m:>10.2e}" for m in mse_scores.tolist()))
+        print("  bic      |" + "".join(f"{b:>10.1f}" for b in bic_scores.tolist()))
+
     os.makedirs(PARAMS_DIR, exist_ok=True)
-    save_path = os.path.join(PARAMS_DIR, 'sindy_rnn.pt')
+    save_path = os.path.join(PARAMS_DIR, rcfg['path_model'])
     est.save(save_path)
     print(f"\n  Saved model to {save_path}")
 

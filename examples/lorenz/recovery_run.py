@@ -31,7 +31,7 @@ import torch
 from examples._common.estimators import PolynomialRNNEstimator, StlsqEstimator
 from data import (
     load_config, generate_lorenz, add_noise, chunk_trajectory, simulate_polynomial_ode,
-    compute_forecast_mse, TRUE_COEFS, TRUE_ACTIVE, RESULTS_DIR,
+    compute_forecast_mse, scale_coefficients, TRUE_COEFS, TRUE_ACTIVE, RESULTS_DIR,
 )
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -42,6 +42,12 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 _cfg = load_config()
 RNN_CONFIG = _cfg['sindy_rnn']
 ESINDY_CONFIG = _cfg['stlsq']
+# See config.yaml's lorenz.normalize comment / data.py's scale_coefficients().
+# run_cell() trains on normalized data but always unscales the discovered
+# coef_matrix back to physical units immediately afterward, so every other
+# function here (compute_metrics, recovery_aggregate.py's forecast replay)
+# stays oblivious to whether normalization happened.
+NORMALIZE = _cfg['lorenz'].get('normalize', False)
 
 # Lorenz physical parameters (must match data.py's TRUE_COEFS).
 SIGMA, RHO, BETA, DT = _cfg['lorenz']['sigma'], _cfg['lorenz']['rho'], _cfg['lorenz']['beta'], _cfg['lorenz']['dt']
@@ -133,16 +139,29 @@ def run_cell(noise_frac, n_steps, seed, method):
     forecast_traj = generate_lorenz(FORECAST_STEPS, DT, SIGMA, RHO, BETA, seed=99999)
     h0_forecast = forecast_traj[0]
 
+    # Per-state std of the observed (noisy) trajectory — same statistic
+    # data.py's generate_or_load_data() uses. scale=[1,1,1] (a no-op) when
+    # NORMALIZE=False.
+    scale = np.std(traj_noisy, axis=0) if NORMALIZE else np.ones(3)
+    traj_train = traj_noisy / scale if NORMALIZE else traj_noisy
+
     t0 = time.time()
     if method == 'factored':
-        coef_matrix, n_active = run_sindy_rnn(traj_noisy, direct=False, seed=seed)
+        coef_matrix, n_active = run_sindy_rnn(traj_train, direct=False, seed=seed)
     elif method == 'direct':
-        coef_matrix, n_active = run_sindy_rnn(traj_noisy, direct=True, seed=seed)
+        coef_matrix, n_active = run_sindy_rnn(traj_train, direct=True, seed=seed)
     elif method == 'esindy':
-        coef_matrix, n_active = run_esindy(traj_noisy)
+        coef_matrix, n_active = run_esindy(traj_train)
     else:
         raise ValueError(f"Unknown method: {method}")
     elapsed = time.time() - t0
+
+    # Rescale back to physical units immediately — everything below
+    # (forecast simulation against physical h0_forecast, compute_metrics
+    # against physical TRUE_COEFS, and recovery_aggregate.py's later
+    # forecast replay from the saved coef_matrix) assumes physical units.
+    if NORMALIZE:
+        coef_matrix = scale_coefficients(coef_matrix, 1 / scale)
 
     sim_traj = simulate_polynomial_ode(coef_matrix, h0_forecast, FORECAST_STEPS, DT)
     forecast_mse, n_valid = compute_forecast_mse(forecast_traj, sim_traj)

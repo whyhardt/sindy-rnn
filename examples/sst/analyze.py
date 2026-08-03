@@ -59,7 +59,7 @@ def main():
     metrics = {}
 
     # ── sindy-rnn ──
-    rnn_path = os.path.join(PARAMS_DIR, 'sindy_rnn.pt')
+    rnn_path = os.path.join(PARAMS_DIR, cfg['sindy_rnn']['path_model'])
     if os.path.exists(rnn_path):
         print("\nEvaluating sindy-rnn...")
         est = RolloutSINDyRNNEstimator.load(
@@ -105,7 +105,7 @@ def main():
         print(f"\nSkipping sindy-rnn: {rnn_path} not found (run train_sindy_rnn.py first)")
 
     # ── SINDy-SHRED ──
-    shred_path = os.path.join(PARAMS_DIR, 'sindy_shred.pt')
+    shred_path = os.path.join(PARAMS_DIR, cfg['sindy_shred']['path_model'])
     if os.path.exists(shred_path):
         print("\nEvaluating SINDy-SHRED...")
         est = SindyShredEstimator.load(shred_path, device=DEVICE)

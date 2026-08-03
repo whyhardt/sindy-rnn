@@ -5,6 +5,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from torch import Tensor
+from tqdm import tqdm
 
 from .pruning import (
     ensemble_prune, threshold_patience_update, threshold_prune,
@@ -94,7 +95,7 @@ def fit(
         refit_epochs: additional epochs with lambda_s=0 and frozen mask after pruning.
             Debiases coefficient estimates by removing penalty shrinkage on the
             identified support. 0 = no refit (default).
-        refit_learning_rate: learning rate for refit phase (default: learning_rate / 5)
+        refit_learning_rate: learning rate for refit phase (default: same as learning_rate)
         dynamics_weight: weight on autonomous forecast loss relative to
             derivative matching loss. 0.0 = derivative matching only (default).
         centered_diff: if True (default), use centered differences for O(dt²)
@@ -103,10 +104,10 @@ def fit(
             loss (0 = no scheduler, default).
         lr_factor: LR reduction factor on plateau.
         min_lr: minimum learning rate.
-        verbose: print training progress every 50 epochs
+        verbose: show a tqdm progress bar with live loss/term-count postfix
     """
     if warmup_steps is None:
-        warmup_steps = epochs // 4
+        warmup_steps = epochs // 2
 
     # Apply optional initial mask exclusions
     if not include_bias:
@@ -188,8 +189,9 @@ def fit(
         valid = ~torch.isnan(dh_dt_target.sum(dim=-1))
         return F.mse_loss(P_h[valid], dh_dt_target[valid])
 
+    epoch_iter = tqdm(range(epochs), desc="Derivative-matching training", disable=not verbose)
     try:
-        for epoch in range(epochs):
+        for epoch in epoch_iter:
             model.train()
 
             if batch_size is not None and batch_size < B:
@@ -230,6 +232,7 @@ def fit(
             # (E, n_states, n_terms) would otherwise dilute the penalty by
             # 1/E as E grows (mirrors fit_rollout()'s lambda_s scaling).
             if lambda_s > 0:
+                # loss = loss + lambda_s * theta.shape[0] * (theta * model.coefficient_masks).abs().mean()
                 loss = loss + lambda_s * theta.shape[0] * (theta * model.coefficient_masks).pow(2).mean()
 
             if not torch.isfinite(loss):
@@ -238,7 +241,7 @@ def fit(
                 # training. Skip the update rather than apply nan/inf
                 # gradients, which would permanently corrupt every weight.
                 if verbose:
-                    print(f"  Non-finite loss at epoch {epoch}: skipping optimization step")
+                    tqdm.write(f"  Non-finite loss at epoch {epoch}: skipping optimization step")
                 optimizer.zero_grad(set_to_none=True)
                 continue
 
@@ -266,21 +269,23 @@ def fit(
                         threshold_prune(model, patience_limit=patience_limit, max_prune=max_prune)
                     n_pruned = n_before - int(model.coefficient_masks.any(dim=0).sum().item())
                 if verbose and n_pruned > 0:
-                    print(f"  [prune] epoch {epoch}: removed {n_pruned} term(s) "
-                          f"(method={pruning_method}, budget={max_prune})")
+                    tqdm.write(f"  [prune] epoch {epoch}: removed {n_pruned} term(s) "
+                              f"(method={pruning_method}, budget={max_prune})")
 
-            if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
+            # Logging: postfix updates every epoch (mirrors fit_rollout()).
+            if verbose:
                 active = model.count_active_terms()
-                total_active = sum(active.values())
-                msg = f"Epoch {epoch:4d} | deriv {tf_loss.item():.6f}"
+                postfix = {'deriv': f'{tf_loss.item():.6f}'}
                 if dynamics_weight > 0:
                     fwd_val = fwd_loss.item() if isinstance(fwd_loss, torch.Tensor) else fwd_loss
-                    msg += f" | fwd {fwd_val:.6f}"
-                msg += f" | active terms: {total_active}"
+                    postfix['fwd'] = f'{fwd_val:.6f}'
+                postfix['lr'] = f'{optimizer.param_groups[0]["lr"]:.1e}'
+                postfix['terms'] = sum(active.values())
                 with torch.no_grad():
                     theta_active = (theta * model.coefficient_masks.float())[model.coefficient_masks].abs()
                     if theta_active.numel() > 0:
-                        msg += f" | |c|_max {theta_active.max().item():.3f} | |c|_mean {theta_active.mean().item():.3f}"
+                        postfix['|c|_max'] = f'{theta_active.max().item():.3f}'
+                        postfix['|c|_mean'] = f'{theta_active.mean().item():.3f}'
                 if xs_test is not None and ys_test is not None:
                     with torch.no_grad():
                         model.eval()
@@ -289,15 +294,15 @@ def fit(
                         theta_te = model.rnn.unfold_polynomial_coefficients()
                         theta_te_m = theta_te * model.coefficient_masks.float()
                         loss_te = _derivative_matching_loss(x_te, y_te, theta_te_m)
-                        msg += f" | test {loss_te.item():.6f}"
-                print(msg)
+                        postfix['test'] = f'{loss_te.item():.6f}'
+                epoch_iter.set_postfix(postfix)
     except KeyboardInterrupt:
         if verbose:
-            print(f"\nTraining interrupted at epoch {epoch}.")
+            tqdm.write(f"\nTraining interrupted at epoch {epoch}.")
 
     # Post-pruning refit: train with lambda_s=0 and frozen mask to debias coefficients
     if refit_epochs > 0:
-        refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate / 5
+        refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate
         refit_optimizer = torch.optim.AdamW(model.parameters(), lr=refit_lr)
         refit_scheduler = None
         if lr_patience > 0:
@@ -311,8 +316,9 @@ def fit(
             print(f"\nRefit phase: {refit_epochs} epochs, lr={refit_lr:.1e}, "
                   f"lambda_s=0, mask frozen ({total_active} active terms)")
 
+        refit_iter = tqdm(range(refit_epochs), desc="Refit", disable=not verbose)
         try:
-            for epoch in range(refit_epochs):
+            for epoch in refit_iter:
                 model.train()
 
                 if batch_size is not None and batch_size < B:
@@ -330,7 +336,7 @@ def fit(
 
                 if not torch.isfinite(loss):
                     if verbose:
-                        print(f"  Non-finite loss in refit epoch {epoch}: skipping optimization step")
+                        tqdm.write(f"  Non-finite loss in refit epoch {epoch}: skipping optimization step")
                     refit_optimizer.zero_grad(set_to_none=True)
                     continue
 
@@ -341,8 +347,9 @@ def fit(
                 if refit_scheduler is not None:
                     refit_scheduler.step(loss.item())
 
-                if verbose and (epoch % 50 == 0 or epoch == refit_epochs - 1):
-                    msg = f"Refit {epoch:4d} | deriv {loss.item():.6f}"
+                if verbose:
+                    postfix = {'deriv': f'{loss.item():.6f}',
+                              'lr': f'{refit_optimizer.param_groups[0]["lr"]:.1e}'}
                     if xs_test is not None and ys_test is not None:
                         with torch.no_grad():
                             model.eval()
@@ -351,11 +358,11 @@ def fit(
                             theta_te = model.rnn.unfold_polynomial_coefficients()
                             theta_te_m = theta_te * model.coefficient_masks.float()
                             loss_te = _derivative_matching_loss(x_te, y_te, theta_te_m)
-                            msg += f" | test {loss_te.item():.6f}"
-                    print(msg)
+                            postfix['test'] = f'{loss_te.item():.6f}'
+                    refit_iter.set_postfix(postfix)
         except KeyboardInterrupt:
             if verbose:
-                print(f"\nRefit interrupted at epoch {epoch}.")
+                tqdm.write(f"\nRefit interrupted at epoch {epoch}.")
 
     # Rank ensemble members by their own fit, so predict()/simulate() can
     # switch from the ensemble mean to the single best-fitting member

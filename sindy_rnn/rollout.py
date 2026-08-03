@@ -485,7 +485,7 @@ def fit_rollout(
     T_start: int = 1,
     delta_T: int = 2,
     E_step: Optional[int] = None,
-    epochs: int = 5000,
+    epochs: int = 0,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
     lambda_0: float = 0,
@@ -504,8 +504,6 @@ def fit_rollout(
     lr_factor: float = 0.5,
     min_lr: float = 1e-6,
     rollout_noise: float = 0.1,
-    refit_epochs: int = 0,
-    refit_learning_rate: Optional[float] = None,
     x_sparse_test: Optional[Tensor] = None,
     x_full_test: Optional[Tensor] = None,
     verbose: bool = True,
@@ -569,16 +567,6 @@ def fit_rollout(
         lr_patience: ReduceLROnPlateau patience (0 = no scheduler)
         lr_factor: LR reduction factor on plateau
         min_lr: minimum learning rate
-        refit_epochs: additional epochs at T_max with lambda_s=0, the mask
-            frozen, and the encoder/decoder frozen. Debiases the dynamics
-            coefficients for the already-discovered structure, which would
-            otherwise stay shrunk by the ongoing L2 penalty. Continues the
-            same trajectory-matching objective (unlike refit_rollout(),
-            which switches to derivative matching — that would undo the
-            noise-robustness of trajectory matching in identity mode).
-            0 = no refit (default).
-        refit_learning_rate: learning rate for refit phase
-            (default: learning_rate / 5)
         x_sparse_test: (N_test, n_sensors) — optional test sensor time series
         x_full_test: (N_test, n_full) — optional test full state time series
         verbose: print training progress
@@ -597,9 +585,16 @@ def fit_rollout(
         n_curriculum_steps = max(1, (T_max - T_start + delta_T - 1) // delta_T)
         E_step = max(1, epochs // (2 * n_curriculum_steps))
 
-    # Epoch when sparsity activates (T_cur first reaches T_max)
-    n_steps_to_max = max(0, (T_max - T_start + delta_T - 1) // delta_T)
-    sparsity_start_epoch = n_steps_to_max * E_step
+    # Epoch when sparsity activates (T_cur first reaches T_max). With no
+    # curriculum to climb (T_max == T_start, e.g. single-step training),
+    # this would otherwise compute to 0 — pruning starts immediately with
+    # no warmup at all — so fall back to a plain epochs/2 warmup instead,
+    # mirroring fit()'s own default (training.py: warmup_steps = epochs // 2).
+    if T_max == T_start:
+        sparsity_start_epoch = epochs // 2
+    else:
+        n_steps_to_max = max(0, (T_max - T_start + delta_T - 1) // delta_T)
+        sparsity_start_epoch = n_steps_to_max * E_step
 
     # Fixed per-event pruning budget: total active terms / total scheduled
     # pruning events, computed once up front so a single noisy early event
@@ -827,101 +822,6 @@ def fit_rollout(
         if verbose:
             print(f"\nTraining interrupted at epoch {epoch}.")
 
-    # Post-pruning refit: debias dynamics coefficients for the
-    # already-discovered structure. Freezes encoder/decoder (avoids a moving
-    # target — the polynomial would otherwise be debiasing against a
-    # shifting z) and continues the same trajectory-matching objective with
-    # lambda_s=0 and the mask frozen (no more pruning calls).
-    if refit_epochs > 0:
-        if model.encoder is not None:
-            for p in model.encoder.parameters():
-                p.requires_grad_(False)
-        for p in model.decoder.parameters():
-            p.requires_grad_(False)
-
-        refit_lr = refit_learning_rate if refit_learning_rate is not None else learning_rate / 5
-        refit_optimizer = torch.optim.AdamW(model.dynamics.parameters(), lr=refit_lr)
-        refit_scheduler = None
-        if lr_patience > 0:
-            refit_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                refit_optimizer, mode='min', factor=lr_factor,
-                patience=lr_patience, min_lr=min_lr)
-
-        if verbose:
-            active = model.count_active_terms()
-            total_active = sum(active.values())
-            print(f"\nRefit phase: {refit_epochs} epochs, lr={refit_lr:.1e}, "
-                  f"lambda_s=0, mask + encoder/decoder frozen "
-                  f"({total_active} active terms)")
-
-        span = T_w + T_cur
-        max_start = N_time - span
-
-        refit_iter = tqdm(range(refit_epochs), desc="Refit", disable=not verbose)
-        try:
-            for r_epoch in refit_iter:
-                model.train()
-
-                n_samples = min(max_start, batches_per_epoch * batch_size)
-                all_starts = torch.randperm(max_start)[:n_samples]
-
-                epoch_rec_loss = 0.
-                n_batches = 0
-
-                for bi in range(0, len(all_starts), batch_size):
-                    starts = all_starts[bi:bi + batch_size]
-                    warmup_slices = [x_sparse_all[s:s + T_w] for s in starts]
-                    target_slices = [
-                        x_full_all[s + T_w - 1:s + T_w - 1 + T_cur + 1]
-                        for s in starts
-                    ]
-                    x_warmup = torch.stack(warmup_slices).to(device)
-                    x_targets = torch.stack(target_slices).to(device)
-
-                    x_hat, z_traj = model(x_warmup, T_cur)
-                    loss = F.mse_loss(x_hat, x_targets)
-
-                    if not torch.isfinite(loss):
-                        if verbose:
-                            tqdm.write(f"  Non-finite loss in refit epoch {r_epoch}: "
-                                       f"skipping optimization step")
-                        refit_optimizer.zero_grad(set_to_none=True)
-                        continue
-
-                    refit_optimizer.zero_grad()
-                    loss.backward()
-                    total_norm = torch.nn.utils.clip_grad_norm_(model.dynamics.parameters(), grad_clip)
-                    if not torch.isfinite(total_norm):
-                        if verbose:
-                            tqdm.write(f"  Non-finite gradient in refit epoch {r_epoch}: "
-                                       f"skipping optimization step")
-                        refit_optimizer.zero_grad(set_to_none=True)
-                        continue
-                    refit_optimizer.step()
-
-                    epoch_rec_loss += loss.item()
-                    n_batches += 1
-
-                avg_rec = epoch_rec_loss / max(n_batches, 1)
-                if refit_scheduler is not None:
-                    refit_scheduler.step(avg_rec)
-
-                if verbose:
-                    postfix = {
-                        'T_cur': T_cur, 'rec': f'{avg_rec:.6f}',
-                        'lr': f'{refit_optimizer.param_groups[0]["lr"]:.1e}',
-                    }
-                    with torch.no_grad():
-                        theta = model.dynamics.rnn.unfold_polynomial_coefficients()
-                        theta_active = theta[model.dynamics.coefficient_masks].abs()
-                        if theta_active.numel() > 0:
-                            postfix['|c|_max'] = f'{theta_active.max().item():.3f}'
-                            postfix['|c|_mean'] = f'{theta_active.mean().item():.3f}'
-                    refit_iter.set_postfix(postfix)
-        except KeyboardInterrupt:
-            if verbose:
-                print(f"\nRefit interrupted at epoch {r_epoch}.")
-
     # Rank ensemble members by their own full-state reconstruction fit —
     # predict()'s same-timestep reconstruction is identical across members
     # (encode() broadcasts one shared z_0 to all E copies), so only the
@@ -1023,8 +923,8 @@ def select_best_member_bic(model: RolloutSINDyRNN, x_sparse_all: Tensor,
     would favor whichever member simply overfits hardest.
 
     Returns:
-        (E,) tensor of per-member BIC scores, or None if there wasn't
-        enough data to evaluate any window.
+        ((E,) bic, (E,) mse) tensors of per-member scores, or (None, None)
+        if there wasn't enough data to evaluate any window.
     """
     model.eval()
     dyn = model._eq_dynamics
@@ -1034,7 +934,7 @@ def select_best_member_bic(model: RolloutSINDyRNN, x_sparse_all: Tensor,
     span = T_w + T_eval
     max_start = N - span
     if max_start < 1:
-        return None
+        return None, None
 
     n_windows = min(max_start, n_windows)
     starts = torch.linspace(0, max_start - 1, n_windows).long()
@@ -1085,8 +985,8 @@ def select_best_member_bic(model: RolloutSINDyRNN, x_sparse_all: Tensor,
         )
         bic = n * torch.log(mse) + k * torch.log(n)
         dyn.bic_member_idx.fill_(int(torch.argmin(bic).item()))
-        return bic
-    return None
+        return bic, mse
+    return None, None
 
 
 def _eval_test(model, x_sparse_test, x_full_test, T_w, T_max, batch_size):

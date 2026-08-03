@@ -59,7 +59,15 @@ class PolynomialRNNEstimator:
         self.device = device
         self.simulate_mode = kwargs.pop('simulate', 'mean')
         self.model_kwargs = kwargs.pop('model_kwargs', {})
-        self.fit_kwargs = kwargs.pop('fit_kwargs', kwargs)
+        fit_kwargs = kwargs.pop('fit_kwargs', kwargs)
+        # Stage 2 debias refit: not one of fit()'s own single-stage-loop
+        # params (see fit() below for the 2-call orchestration) — popped
+        # here so it isn't forwarded to fit_polynomial_rnn() as a stray
+        # kwarg. Reuses fit()'s existing `refit_epochs`/`refit_learning_rate`
+        # names so config.yaml's sindy_rnn: section doesn't need new keys.
+        self.refit_debias_epochs = fit_kwargs.pop('refit_epochs', 0)
+        self.refit_learning_rate = fit_kwargs.pop('refit_learning_rate', None)
+        self.fit_kwargs = fit_kwargs
         self.model = None
 
     def _reduce_ensemble(self, tensor):
@@ -71,9 +79,52 @@ class PolynomialRNNEstimator:
         return tensor.mean(0)
 
     def fit(self, xs, ys):
+        """Two plain calls to fit_polynomial_rnn(), mirroring
+        RolloutSINDyRNNEstimator's Stage 1/2.1/2.2 split — minus Stage 2.1,
+        which exists there only to re-discover structure against an
+        encoder/decoder that was still moving during Stage 1. There's no
+        encoder here (z IS h from epoch 0), so Stage 1's pruning votes and
+        coefficients are already trustworthy; only the debias step is worth
+        repeating on its own:
+
+          - Stage 1: derivative-matching + pruning training (fit_kwargs as
+            configured, refit_epochs forced to 0 — Stage 2 below replaces
+            fit()'s own in-place refit).
+          - Stage 2 (refit_debias_epochs>0): resets the dynamics
+            coefficients to a fresh init (model.reset_dynamics_parameters(),
+            mask left untouched) and refits with lambda_s=weight_decay=0
+            and pruning_threshold=0 (pruning inert, mask stays frozen) — an
+            unbiased refit on fixed structure, analogous to an OLS refit
+            after lasso support selection. Resetting first (rather than
+            continuing in place, as fit()'s own refit_epochs does) removes
+            the penalty-shrinkage bias already baked into Stage 1's
+            coefficients instead of refitting on top of it.
+        """
         xs, ys = _to_tensor(xs), _to_tensor(ys)
-        self.model = PolynomialRNN(**self.model_kwargs).to(self.device)
-        fit_polynomial_rnn(self.model, xs.to(self.device), ys.to(self.device), **self.fit_kwargs)
+        xs_dev, ys_dev = xs.to(self.device), ys.to(self.device)
+        if self.model is None:
+            self.model = PolynomialRNN(**self.model_kwargs).to(self.device)
+
+        if self.fit_kwargs.get('verbose', True):
+            print(f"\nStage 1: Derivative-matching + pruning training "
+                  f"({self.fit_kwargs.get('epochs', 500)} epochs)")
+        fit_polynomial_rnn(self.model, xs_dev, ys_dev, **{**self.fit_kwargs, 'refit_epochs': 0})
+
+        if self.refit_debias_epochs <= 0:
+            return self
+
+        self.model.reset_dynamics_parameters()
+        refit_lr = self.refit_learning_rate
+        if refit_lr is None:
+            refit_lr = self.fit_kwargs.get('learning_rate', 1e-2)
+
+        if self.fit_kwargs.get('verbose', True):
+            print(f"\nStage 2: Debias refit ({self.refit_debias_epochs} epochs)")
+        fit_polynomial_rnn(self.model, xs_dev, ys_dev, **{
+            **self.fit_kwargs, 'epochs': self.refit_debias_epochs,
+            'learning_rate': refit_lr, 'lambda_s': 0., 'weight_decay': 0.,
+            'pruning_threshold': 0., 'warmup_steps': 0, 'refit_epochs': 0,
+        })
         return self
 
     def predict(self, xs):
@@ -158,6 +209,13 @@ class RolloutSINDyRNNEstimator:
     def __init__(self, device='cpu', **kwargs):
         self.device = device
         self.simulate_mode = kwargs.pop('simulate', 'mean')
+        # Stage 2.1/2.2 refit epochs: not fit_rollout() params (that
+        # function is a plain single-stage trainer — see fit() below for
+        # the 3-call orchestration), so pop them before the _FIT_ROLLOUT_PARAMS
+        # filter would otherwise just silently drop them.
+        self.refit_discovery_epochs = kwargs.pop('refit_discovery_epochs', 0)
+        self.refit_debias_epochs = kwargs.pop('refit_debias_epochs', 0)
+        self.refit_learning_rate = kwargs.pop('refit_learning_rate', None)
         self.fit_kwargs = {k: v for k, v in kwargs.items() if k in _FIT_ROLLOUT_PARAMS}
         self.model_kwargs = {k: v for k, v in kwargs.items()
                              if k in _ROLLOUT_MODEL_PARAMS and k not in _FIT_ROLLOUT_PARAMS}
@@ -165,10 +223,83 @@ class RolloutSINDyRNNEstimator:
         self.model = None
 
     def fit(self, xs, ys):
-        """xs: (N_time, n_sensors) sparse observations. ys: (N_time, n_full)."""
+        """xs: (N_time, n_sensors) sparse observations. ys: (N_time, n_full).
+
+        Three plain calls to fit_rollout(), not one function packed with
+        stage logic:
+          - Stage 1: joint encoder/decoder + SINDy training (fit_kwargs as
+            configured). If self.model is already set (e.g. loaded from a
+            checkpoint before calling fit()), reuses it instead of
+            constructing fresh — lets epochs=0 skip Stage 1 entirely.
+          - Stage 2.1 (refit_discovery_epochs>0): freezes encoder/decoder,
+            resets the mask (all-active) and dynamics coefficients (fresh
+            init) since Stage 1's pruning votes and coefficients were both
+            shaped while the encoder/decoder were still moving, then
+            re-runs fit_rollout() with the same lambda_s/weight_decay/
+            pruning schedule and learning rate as Stage 1 — same
+            T_w/T_max/T_start/delta_T curriculum, just its own shorter
+            epoch budget (E_step recomputed fresh so the ramp still fits).
+          - Stage 2.2 (refit_debias_epochs>0): resets the coefficients
+            again (keeps whatever mask 2.1 left, or Stage 1's mask
+            directly if refit_discovery_epochs=0), then re-runs
+            fit_rollout() with lambda_s=weight_decay=0 and pruning
+            disabled (pruning_threshold=0) — an unbiased refit on fixed
+            structure, analogous to an OLS refit after lasso support
+            selection. lambda_0 is 0 in both refit stages since the
+            encoder is frozen (z_0 regularization would be a no-op).
+        See CLAUDE.md §14 "fit_rollout() resilience/debiasing" for why
+        Stage 2.1/2.2 need encoder/decoder frozen and can't skip straight
+        to the full T_max rollout from freshly reset coefficients.
+        """
         xs, ys = _to_tensor(xs), _to_tensor(ys)
-        self.model = RolloutSINDyRNN(**self.model_kwargs).to(self.device)
-        fit_rollout(self.model, xs.to(self.device), ys.to(self.device), **self.fit_kwargs)
+        xs_dev, ys_dev = xs.to(self.device), ys.to(self.device)
+        if self.model is None:
+            self.model = RolloutSINDyRNN(**self.model_kwargs).to(self.device)
+
+        if self.fit_kwargs.get('verbose', True):
+            print(f"\nStage 1: Joint encoder/decoder + SINDy training "
+                  f"({self.fit_kwargs.get('epochs', 5000)} epochs)")
+        fit_rollout(self.model, xs_dev, ys_dev, **self.fit_kwargs)
+
+        if self.refit_discovery_epochs <= 0 and self.refit_debias_epochs <= 0:
+            return self
+
+        if self.model.encoder is not None:
+            for p in self.model.encoder.parameters():
+                p.requires_grad_(False)
+        for p in self.model.decoder.parameters():
+            p.requires_grad_(False)
+
+        refit_lr = self.refit_learning_rate
+        if refit_lr is None:
+            refit_lr = self.fit_kwargs.get('learning_rate', 1e-3)
+
+        # E_step=None forces a fresh auto-computed curriculum step size for
+        # each stage's own (much shorter) epoch budget — reusing Stage 1's
+        # E_step here would either never reach T_max or reach it instantly.
+        refit_common = dict(self.fit_kwargs)
+        refit_common['learning_rate'] = refit_lr
+        refit_common['lambda_0'] = 0.
+        refit_common['E_step'] = None
+
+        if self.refit_discovery_epochs > 0:
+            self.model.dynamics.reset_masks()
+            self.model.dynamics.reset_dynamics_parameters()
+            if self.fit_kwargs.get('verbose', True):
+                print(f"\nStage 2.1: Discovery refit "
+                      f"({self.refit_discovery_epochs} epochs)")
+            fit_rollout(self.model, xs_dev, ys_dev,
+                       **{**refit_common, 'epochs': self.refit_discovery_epochs})
+
+        if self.refit_debias_epochs > 0:
+            self.model.dynamics.reset_dynamics_parameters()
+            if self.fit_kwargs.get('verbose', True):
+                print(f"\nStage 2.2: Debias refit "
+                      f"({self.refit_debias_epochs} epochs)")
+            fit_rollout(self.model, xs_dev, ys_dev,
+                       **{**refit_common, 'epochs': self.refit_debias_epochs,
+                          'lambda_s': 0., 'weight_decay': 0., 'pruning_threshold': 0.})
+
         return self
 
     def predict(self, xs):

@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import torch
 
-from sindy_rnn.rollout import RolloutSINDyRNN, select_best_member, select_best_member_bic
+from sindy_rnn.rollout import RolloutSINDyRNN, select_best_member_bic
 from examples._common.estimators import RolloutSINDyRNNEstimator, resolve_member
 from data import load_config, load_data, get_sensor_locs, train_test_split, validation_frames, fit_scaler, PARAMS_DIR
 
@@ -59,50 +59,38 @@ def main():
     print(f"  Latent dim: {dcfg['n_latent']}, Poly degree: {rcfg['polynomial_degree']}")
 
     os.makedirs(PARAMS_DIR, exist_ok=True)
-    save_path = os.path.join(PARAMS_DIR, 'sindy_rnn.pt')
+    save_path = os.path.join(PARAMS_DIR, rcfg['path_model'])
+
+    est = RolloutSINDyRNNEstimator(
+        device=DEVICE,
+        n_full=full_dim,
+        x_sparse_test=x_sparse_val,
+        x_full_test=x_full_val,
+        verbose=True,
+        **dcfg,
+        **rcfg,
+    )
 
     if rcfg.get('epochs', 1) == 0:
-        # No training — reload the existing checkpoint and only recompute
-        # best/bic member selection (e.g. to pick up a newly added
-        # selection mode, or a different config['sindy_rnn']['simulate'],
-        # without repeating a long training run).
+        # Stage 1 skipped — reload the existing checkpoint and let fit()
+        # run only whatever Stage 2.1/2.2 refit epochs are configured on top
+        # of it (e.g. to re-run refit with new refit_* settings, or just
+        # recompute best/bic selection with both refit stages at 0, without
+        # repeating Stage 1's long training run).
         if not os.path.exists(save_path):
             raise FileNotFoundError(
                 f"epochs=0 requires an existing checkpoint at {save_path} to reload")
-        print(f"\n  epochs=0: reloading {save_path} and recomputing best/bic selection "
-              f"(no training)")
-        model = RolloutSINDyRNN.load(save_path).to(DEVICE)
-        x_sparse_train_t = torch.tensor(x_sparse_train, dtype=torch.float32, device=DEVICE)
-        x_full_train_t = torch.tensor(x_full_train, dtype=torch.float32, device=DEVICE)
-        eval_batch_size = rcfg.get('batch_size', 32)
-        select_best_member(model, x_sparse_val.to(DEVICE), x_full_val.to(DEVICE),
-                           T_w, rcfg['T_max'], batch_size=eval_batch_size)
-        select_best_member_bic(model, x_sparse_train_t, x_full_train_t, T_w, rcfg['T_max'],
-                               batch_size=eval_batch_size)
-        bic_scores = select_best_member_bic(model, x_sparse_train_t, x_full_train_t, T_w, rcfg['T_max'], 
-                                            batch_size=eval_batch_size)
-        est = RolloutSINDyRNNEstimator(device=DEVICE, simulate=rcfg.get('simulate', 'mean'), T_w=T_w)
-        est.model = model
-        elapsed = 0.
-    else:
-        est = RolloutSINDyRNNEstimator(
-            device=DEVICE,
-            n_full=full_dim,
-            x_sparse_test=x_sparse_val,
-            x_full_test=x_full_val,
-            verbose=True,
-            **dcfg,
-            **rcfg,
-        )
+        print(f"\n  epochs=0: reloading {save_path} (Stage 1 skipped)")
+        est.model = RolloutSINDyRNN.load(save_path).to(DEVICE)
 
-        t0 = time.time()
-        est.fit(x_sparse_train, x_full_train)
-        elapsed = time.time() - t0
+    t0 = time.time()
+    est.fit(x_sparse_train, x_full_train)
+    elapsed = time.time() - t0
 
-        x_sparse_train_t = torch.tensor(x_sparse_train, dtype=torch.float32, device=DEVICE)
-        x_full_train_t = torch.tensor(x_full_train, dtype=torch.float32, device=DEVICE)
-        bic_scores = select_best_member_bic(est.model, x_sparse_train_t, x_full_train_t, T_w, rcfg['T_max'],
-                                            batch_size=rcfg.get('batch_size', 32))
+    x_sparse_train_t = torch.tensor(x_sparse_train, dtype=torch.float32, device=DEVICE)
+    x_full_train_t = torch.tensor(x_full_train, dtype=torch.float32, device=DEVICE)
+    bic_scores, mse_scores = select_best_member_bic(est.model, x_sparse_train_t, x_full_train_t, T_w, rcfg['T_max'],
+                                        batch_size=rcfg.get('batch_size', 32))
 
     member = resolve_member(est)
     print(f"\n  Discovered equations{' (best member)' if member is not None else ''}:")
@@ -121,6 +109,8 @@ def main():
         print("  member   |" + "".join(f"{e:>10d}" for e in range(E)))
         print("  threshold|" + "".join(f"{t:>10.2e}" for t in thresholds))
         print("  n_coef   |" + "".join(f"{n:>10d}" for n in n_coefs))
+        if mse_scores is not None:
+            print("  mse      |" + "".join(f"{m:>10.2e}" for m in mse_scores.tolist()))
         if bic_scores is not None:
             print("  bic      |" + "".join(f"{b:>10.1f}" for b in bic_scores.tolist()))
 

@@ -11,28 +11,31 @@ lorenz:
   rho: 28.0                               # Lorenz ODE parameter
   beta: 2.6666666666666665                # Lorenz ODE parameter (8/3)
   dt: 0.01                                # integration timestep
-  n_steps: 5000                           # training trajectory length
+  n_steps: 1000                           # training trajectory length
   forecast_steps: 100                     # autonomous forecast horizon for evaluation
   noise_frac: 0.                          # observation noise as fraction of state std
   seed: 42                                # trajectory generation seed
   noise_seed: 0                           # noise sampling seed
+  normalize: true                         # divide each state by its own std (no centering)
 
 # Derivative-matching sindy-rnn (PolynomialRNN + fit()) — see train_sindy_rnn.py
 sindy_rnn:
+  path_model: sindy_rnn.pt                # checkpoint filename, relative to PARAMS_DIR
   degree: 2                               # polynomial degree
   ensemble_size: 10                       # number of dynamics ensemble members
   epochs: 5000                            # total training epochs
-  warmup_steps: 2500                      # epochs before pruning begins
+  warmup_steps: 500                      # epochs before pruning begins
+  refit_epochs: 5000                      # extra epochs post-pruning, penalty off, mask frozen
   window_size: 100                        # trajectory chunk length per training window
-  learning_rate: 0.01                     # AdamW learning rate
-  lambda_s: 0.01                          # L2 penalty weight on polynomial coefficients
-  weight_decay: 0.                        # AdamW weight decay on all params (on top of lambda_s on theta)
+  learning_rate: 0.05                    # AdamW learning rate
+  lr_patience: 0                          # ReduceLROnPlateau patience (0 = no scheduler)
+  lambda_s: 0.                           # L1 penalty weight on polynomial coefficients
+  weight_decay: 0.1                        # AdamW weight decay on all params (on top of lambda_s on theta)
   pruning_frequency: 50                   # epochs between pruning passes
   pruning_threshold: 0.5                  # min |coefficient| to count as "present"
-  pruning_method: agreement               # 'agreement', 'median', or 'ladder' ensemble pruning test
+  patience_limit: 1                       # consecutive failed pruning events before permanent removal (default 2)
+  pruning_method: agreement                  # 'agreement', 'median', or 'ladder' ensemble pruning test
   agreement_frac: 0.5                     # fraction of ensemble that must agree to survive
-  refit_epochs: 1000                      # extra epochs post-pruning, penalty off, mask frozen
-  lr_patience: 0                          # ReduceLROnPlateau patience (0 = no scheduler)
   simulate: best                          # 'mean' (ensemble average), 'best' (single-best-fitting member, set at train time), or 'bic' (single member ranked by BIC on training data, penalizes term count)
 
 # Trajectory-matching alternative to sindy_rnn's derivative matching: same
@@ -50,31 +53,33 @@ sindy_rnn:
 # so this whole section can be forwarded with **rcfg — add a new tunable
 # kwarg here and it's picked up automatically, no script edit needed.
 sindy_rnn_rollout:
+  path_model: sindy_rnn_rollout.pt        # checkpoint filename, relative to PARAMS_DIR
   polynomial_degree: 2                    # cubic dynamics (reference ODE has cubic terms)
   ensemble_size: 10                       # number of dynamics ensemble members
   num_euler_steps: 3                      # sub-steps per dt during rollout integration
-  T_max: 10                               # max rollout length = 2 seconds
+  T_max: 1                                # max rollout length = 2 seconds
   T_start: 1                              # initial rollout length at curriculum start
   delta_T: 1                              # rollout length increment per curriculum step
-  epochs: 1000                            # total training epochs
+  epochs: 5000                            # total training epochs
+  refit_debias_epochs: 2500               # Stage 2.2: coefficients reset, mask frozen, penalty off
   batch_size: 256                         # small — full_dim scales with downsample above
   batches_per_epoch: 8                    # mini-batches sampled per epoch
   learning_rate: 0.01                     # Adam learning rate
-  lambda_0: 0.                            # sparsity penalty on polynomial coefficients
-  lambda_s: 0.01                          # sparsity penalty on polynomial coefficients
-  weight_decay: 0.                        # AdamW weight decay on encoder/decoder only
   grad_clip: 1.0                          # gradient clipping norm
+  lr_patience: 50                         # ReduceLROnPlateau patience (0 = no scheduler)
+  rollout_noise: 0.1                      # per-step noise injected into z during training
+  lambda_0: 0.                            # sparsity penalty on polynomial coefficients
+  lambda_s: 0.0001                        # sparsity penalty on polynomial coefficients
+  weight_decay: 0.                        # AdamW weight decay on encoder/decoder only
   pruning_threshold: 0.5                  # min |coefficient| to count as "present"
   pruning_frequency: 50                   # epochs between pruning passes
-  pruning_method: agreement               # 'agreement', 'median', or 'ladder' ensemble pruning test
+  pruning_method: ladder                  # 'agreement', 'median', or 'ladder' ensemble pruning test
   agreement_frac: 0.5                     # agreement rate across ensemble members on term presence
-  lr_patience: 0                          # ReduceLROnPlateau patience (0 = no scheduler)
-  refit_epochs: 2000                      # extra epochs post-pruning, penalty off, mask frozen
-  rollout_noise: 0.1                      # per-step noise injected into z during training
-  simulate: best                          # 'mean' (ensemble average), 'best' (single-best-fitting member, set at train time), or 'bic' (single member ranked by BIC on training data, penalizes term count)
+  simulate: bic                           # 'mean' (ensemble average), 'best' (single-best-fitting member, set at train time), or 'bic' (single member ranked by BIC on training data, penalizes term count)
 
 # E-SINDy
 stlsq:
+  path_model: stlsq.npz                   # checkpoint filename, relative to PARAMS_DIR
   threshold: 0.5                          # STLSQ coefficient thresholding cutoff
   alpha: 0.1                              # STLSQ ridge regression regularization strength
   n_models: 10                            # bagging ensemble size (match sindy-rnn E)

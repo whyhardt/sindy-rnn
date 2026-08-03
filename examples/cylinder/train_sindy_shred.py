@@ -61,7 +61,7 @@ def main():
     print(f"  Training time: {elapsed:.1f}s")
 
     os.makedirs(PARAMS_DIR, exist_ok=True)
-    save_path = os.path.join(PARAMS_DIR, 'sindy_shred.pt')
+    save_path = os.path.join(PARAMS_DIR, scfg['path_model'])
     est.save(save_path)
     print(f"\n  Saved model to {save_path}")
 

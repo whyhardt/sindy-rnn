@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from examples._common.estimators import PolynomialRNNEstimator, RolloutSINDyRNNEstimator, StlsqEstimator, resolve_member
 from examples._common.plotting import plot_trajectory_grid
 from data import (
-    load_config, generate_or_load_data, compute_forecast_mse,
+    load_config, generate_or_load_data, compute_forecast_mse, scale_coefficients,
     TRUE_COEFS, TRUE_ACTIVE, PARAMS_DIR, RESULTS_DIR,
 )
 
@@ -45,11 +45,20 @@ def coefficient_metrics(coef_matrix):
     }
 
 
-def get_coef_matrix(model, member=None):
+def get_coef_matrix(model, member=None, scale=None):
+    """scale: (3,) divisor a model trained on normalized data used (see
+    data.py's generate_or_load_data). If given and not all-ones, the raw
+    extracted coefficients (in normalized h-units) are rescaled back to
+    physical x/y/z units via scale_coefficients(), so every downstream
+    consumer (coefficient_metrics against TRUE_COEFS, recovery_run.py's
+    saved coef_matrix, recovery_aggregate.py's forecast replay) can stay
+    oblivious to whether normalization happened."""
     coefs = model.get_coefficients(aggregate=True, member=member)
     coef_matrix = np.zeros((3, model.rnn._n_library_terms))
     for i, name in enumerate(model.state_names):
         coef_matrix[i] = coefs[name].cpu().numpy()
+    if scale is not None and not np.allclose(scale, 1):
+        coef_matrix = scale_coefficients(coef_matrix, 1 / scale)
     return coef_matrix
 
 
@@ -107,18 +116,28 @@ def main():
     clean_test = data['clean_test']
     h0 = clean_test[0]
 
+    # scale is all-ones (a no-op) unless lorenz.normalize=True. Models then
+    # trained on h = x/scale; get_coef_matrix()'s scale= arg rescales the
+    # extracted coefficients back to physical units before any comparison
+    # against TRUE_COEFS. h0/clean_test/sim stay in whatever units the
+    # model actually operates in (self-consistent for forecast MSE), so
+    # only the coefficient-recovery numbers need this correction.
+    scale = data['scale']
+    if not np.allclose(scale, 1):
+        print(f"  normalize=True: scale={scale}")
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
     metrics = {}
     sims = {}
 
     # ── sindy-rnn ──
-    rnn_path = os.path.join(PARAMS_DIR, 'sindy_rnn.pt')
+    rnn_path = os.path.join(PARAMS_DIR, cfg['sindy_rnn']['path_model'])
     if os.path.exists(rnn_path):
         print("\nEvaluating sindy-rnn...")
         est = PolynomialRNNEstimator.load(
             rnn_path, simulate=cfg['sindy_rnn'].get('simulate', 'mean'))
         member = resolve_member(est)
-        coef_matrix = get_coef_matrix(est.model, member=member)
+        coef_matrix = get_coef_matrix(est.model, member=member, scale=scale)
 
         sim = est.simulate(h0[None, :], lcfg['forecast_steps'])[0]
         fore_mse, n_valid = compute_forecast_mse(clean_test, sim)
@@ -139,14 +158,14 @@ def main():
         print(f"\nSkipping sindy-rnn: {rnn_path} not found (run train_sindy_rnn.py first)")
 
     # ── sindy-rnn-rollout (trajectory matching) ──
-    rollout_path = os.path.join(PARAMS_DIR, 'sindy_rnn_rollout.pt')
+    rollout_path = os.path.join(PARAMS_DIR, cfg['sindy_rnn_rollout']['path_model'])
     if os.path.exists(rollout_path):
         print("\nEvaluating sindy-rnn-rollout...")
         est = RolloutSINDyRNNEstimator.load(
             rollout_path, T_w=1,
             simulate=cfg['sindy_rnn_rollout'].get('simulate', 'mean'))
         member = resolve_member(est)
-        coef_matrix = get_coef_matrix(est.model.dynamics, member=member)
+        coef_matrix = get_coef_matrix(est.model.dynamics, member=member, scale=scale)
 
         sim = est.simulate(h0[None, :], lcfg['forecast_steps'])
         fore_mse, n_valid = compute_forecast_mse(clean_test, sim)
@@ -168,11 +187,15 @@ def main():
               f"(run train_sindy_rnn_rollout.py first)")
 
     # ── STLSQ ──
-    stlsq_path = os.path.join(PARAMS_DIR, 'stlsq.npz')
+    stlsq_path = os.path.join(PARAMS_DIR, cfg['stlsq']['path_model'])
     if os.path.exists(stlsq_path):
         print("\nEvaluating STLSQ...")
         est = StlsqEstimator.load(stlsq_path, simulate=cfg['stlsq'].get('simulate'))
-        coef_matrix = est.coef_matrix
+        # est.coef_matrix stays in whatever units it was fit on (needed
+        # as-is by est.simulate() below, self-consistent with h0); only the
+        # copy used for coefficient_metrics needs rescaling to physical units.
+        coef_matrix = (est.coef_matrix if np.allclose(scale, 1)
+                      else scale_coefficients(est.coef_matrix, 1 / scale))
 
         sim = est.simulate(h0, lcfg['forecast_steps'])
         fore_mse, n_valid = compute_forecast_mse(clean_test, sim)

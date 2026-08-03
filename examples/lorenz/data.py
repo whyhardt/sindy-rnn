@@ -59,6 +59,53 @@ def generate_lorenz(n_steps, dt, sigma, rho, beta, seed):
     return np.array(traj)
 
 
+def _library_term_exponents(n_states, degree):
+    """Per-term, per-state exponent tuples in the same
+    combinations_with_replacement order as simulate_polynomial_ode's
+    library (and TRUE_COEFS's own column order:
+    [1, x, y, z, x^2, x*y, x*z, y^2, y*z, z^2])."""
+    exps = [tuple(0 for _ in range(n_states))]  # constant term
+    for d in range(1, degree + 1):
+        for combo in combinations_with_replacement(range(n_states), d):
+            e = [0] * n_states
+            for idx in combo:
+                e[idx] += 1
+            exps.append(tuple(e))
+    return exps
+
+
+def scale_coefficients(coef_matrix, scale, degree=2):
+    """Rescale a polynomial ODE's coefficients for h = x / scale
+    (elementwise diagonal rescaling, no centering).
+
+    Centering (subtracting a mean) would introduce new lower-degree cross
+    terms into the transformed polynomial (e.g. (x-mu)^2 = x^2 - 2*mu*x +
+    mu^2), destroying the library's sparsity pattern. Pure scaling maps
+    monomials to monomials one-to-one — (scale*h)^a = scale^a * h^a — so
+    the same sparsity pattern survives; only coefficient magnitudes change.
+    This is what keeps coefficient-recovery comparisons (TRUE_ACTIVE) valid
+    after normalization: TRUE_ACTIVE's nonzero pattern is unaffected by
+    this transform, since scale_j > 0 never zeroes out a nonzero entry.
+
+    dh_i/dt = (1/scale_i) * f_i(scale * h)
+    coef_scaled[i, term] = coef[i, term] * prod(scale_j ** e_j) / scale_i
+
+    Call with `scale` to go from physical units to normalized (h) units,
+    or with `1 / scale` for the inverse (normalized -> physical) — the same
+    formula runs both directions.
+    """
+    n_states = coef_matrix.shape[0]
+    exps = _library_term_exponents(n_states, degree)
+    scaled = np.zeros_like(coef_matrix)
+    for i in range(n_states):
+        for t, e in enumerate(exps):
+            factor = 1.0
+            for j in range(n_states):
+                factor *= scale[j] ** e[j]
+            scaled[i, t] = coef_matrix[i, t] * factor / scale[i]
+    return scaled
+
+
 def add_noise(trajectory, noise_frac, seed):
     if noise_frac == 0:
         return trajectory.copy()
@@ -129,7 +176,13 @@ def generate_or_load_data(cfg):
     trajectory for forecast evaluation.
 
     Returns dict with 'clean_train', 'noisy_train', 'clean_test' arrays,
-    each (n_steps+1, 3).
+    each (n_steps+1, 3), plus 'scale' (3,) — the per-state divisor applied
+    when lorenz.normalize=True (all ones, a no-op, otherwise). Every
+    trajectory here is divided by the same 'scale', so anything consuming
+    this dict (training scripts, forecast comparisons) stays internally
+    consistent without needing to know normalization happened. Only
+    comparisons against physical-unit ground truth (TRUE_COEFS) need to
+    account for 'scale' explicitly — see scale_coefficients().
     """
     lcfg = cfg['lorenz']
 
@@ -141,4 +194,15 @@ def generate_or_load_data(cfg):
         lcfg['forecast_steps'], lcfg['dt'], lcfg['sigma'], lcfg['rho'], lcfg['beta'],
         seed=lcfg['seed'] + 1)
 
-    return {'clean_train': clean_train, 'noisy_train': noisy_train, 'clean_test': clean_test}
+    scale = np.ones(3)
+    if lcfg.get('normalize', False):
+        # Per-state std of the observed (noisy) training trajectory — the
+        # same statistic any method would have access to without peeking
+        # at clean/held-out data.
+        scale = np.std(noisy_train, axis=0)
+        clean_train = clean_train / scale
+        noisy_train = noisy_train / scale
+        clean_test = clean_test / scale
+
+    return {'clean_train': clean_train, 'noisy_train': noisy_train,
+            'clean_test': clean_test, 'scale': scale}

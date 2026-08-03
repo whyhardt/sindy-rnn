@@ -19,6 +19,7 @@ data:
 # so this whole section can be forwarded with **rcfg — add a new tunable
 # kwarg here and it's picked up automatically, no script edit needed.
 sindy_rnn:
+  path_model: sindy_rnn.pt                # checkpoint filename, relative to PARAMS_DIR
   polynomial_degree: 3                    # cubic dynamics (reference ODE has cubic terms)
   ensemble_size: 10                       # number of dynamics ensemble members
   num_euler_steps: 3                      # sub-steps per dt during rollout integration
@@ -28,25 +29,27 @@ sindy_rnn:
   T_max: null                             # max rollout length; null = defaults to test_length
   T_start: 1                              # initial rollout length at curriculum start
   delta_T: 1                              # rollout length increment per curriculum step
-  epochs: 1000                            # total training epochs
+  epochs: 500                             # total training epochs
+  refit_discovery_epochs: 250             # Stage 2.1: mask reset + re-pruned against frozen encoder/decoder
+  refit_debias_epochs: 250                # Stage 2.2: coefficients reset, mask frozen, penalty off
+  learning_rate: 0.005                    # Adam learning rate
   batch_size: 16                          # small — full_dim scales with downsample above
   batches_per_epoch: 8                    # mini-batches sampled per epoch
-  learning_rate: 0.005                    # Adam learning rate
+  grad_clip: 1.0                          # gradient clipping norm
+  lr_patience: 50                         # ReduceLROnPlateau patience (0 = no scheduler)
+  rollout_noise: 0.01                     # per-step noise injected into z during training
   lambda_0: 0.01                          # z_0 norm regularization -> keeps initial latent state encoded by GRU in range
   lambda_s: 0.0001                        # L1 sparsity penalty on polynomial coefficients
-  weight_decay: 0. #01                      # AdamW weight decay on encoder/decoder only
-  grad_clip: 1.0                          # gradient clipping norm
+  weight_decay: 0.                        # AdamW weight decay on encoder/decoder only
   pruning_threshold: 0.1                  # min |coefficient| to count as "present"
   pruning_frequency: 50                   # epochs between pruning passes
   patience_limit: 1                       # consecutive failed pruning events before permanent removal (default 2)
   pruning_method: ladder                  # 'agreement', 'median' or 'ladder' ensemble pruning
   agreement_frac: 0.5                     # term presence agreement rate across ensemble members
-  lr_patience: 50                         # ReduceLROnPlateau patience (0 = no scheduler)
-  refit_epochs: 200                       # extra epochs post-pruning, penalty off, mask frozen
-  rollout_noise: 0.01                     # per-step noise injected into z during training
   simulate: bic                           # 'mean' (ensemble average), 'best' (single-best-fitting member, set at train time), or 'bic' (single member ranked by BIC on training data, penalizes term count)
 
 sindy_shred:
+  path_model: sindy_shred.pt              # checkpoint filename, relative to PARAMS_DIR
   poly_order: 3                           # SINDy library polynomial degree
   gru_layers: 2                           # number of GRU encoder layers
   decoder_l1: 350                         # decoder's first hidden layer width
