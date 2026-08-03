@@ -28,22 +28,23 @@ sindy_rnn:
   T_max: null                             # max rollout length; null = defaults to test_length
   T_start: 1                              # initial rollout length at curriculum start
   delta_T: 1                              # rollout length increment per curriculum step
-  epochs: 500                             # total training epochs
+  epochs: 1000                            # total training epochs
   batch_size: 16                          # small — full_dim scales with downsample above
   batches_per_epoch: 8                    # mini-batches sampled per epoch
   learning_rate: 0.005                    # Adam learning rate
-  lambda_0: 0.                            # z_0 norm regularization
-  lambda_s: 0.                            # sparsity penalty on polynomial coefficients
-  weight_decay: 0.01                      # AdamW weight decay on encoder/decoder only
+  lambda_0: 0.01                          # z_0 norm regularization -> keeps initial latent state encoded by GRU in range
+  lambda_s: 0.0001                        # L1 sparsity penalty on polynomial coefficients
+  weight_decay: 0. #01                      # AdamW weight decay on encoder/decoder only
   grad_clip: 1.0                          # gradient clipping norm
-  pruning_threshold: 1.0                  # min |coefficient| to count as "present"
+  pruning_threshold: 0.1                  # min |coefficient| to count as "present"
   pruning_frequency: 50                   # epochs between pruning passes
-  pruning_method: agreement               # 'agreement', 'median' or 'ladder' ensemble pruning
+  patience_limit: 1                       # consecutive failed pruning events before permanent removal (default 2)
+  pruning_method: ladder                  # 'agreement', 'median' or 'ladder' ensemble pruning
   agreement_frac: 0.5                     # term presence agreement rate across ensemble members
   lr_patience: 50                         # ReduceLROnPlateau patience (0 = no scheduler)
   refit_epochs: 200                       # extra epochs post-pruning, penalty off, mask frozen
   rollout_noise: 0.01                     # per-step noise injected into z during training
-  simulate: mean                          # 'mean' (ensemble average) or 'best' (single-best-fitting member, set at train time)
+  simulate: bic                           # 'mean' (ensemble average), 'best' (single-best-fitting member, set at train time), or 'bic' (single member ranked by BIC on training data, penalizes term count)
 
 sindy_shred:
   poly_order: 3                           # SINDy library polynomial degree

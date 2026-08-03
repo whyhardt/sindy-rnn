@@ -25,16 +25,34 @@ def _to_tensor(x, device='cpu'):
     return torch.tensor(np.asarray(x), dtype=torch.float32, device=device)
 
 
+def resolve_member(est):
+    """Member index for get_equations()/count_active_terms(), consistent
+    with est.simulate_mode: 'mean' -> None (report the ensemble aggregate),
+    'best' -> est.model.best_member_idx, 'bic' -> est.model.bic_member_idx.
+    Works for both PolynomialRNNEstimator and RolloutSINDyRNNEstimator,
+    whose .model exposes the same two index buffers/properties."""
+    if est.simulate_mode == 'best':
+        return est.model.best_member_idx.item()
+    if est.simulate_mode == 'bic':
+        return est.model.bic_member_idx.item()
+    return None
+
+
 class PolynomialRNNEstimator:
     """Wraps PolynomialRNN + fit() (derivative matching, full-state).
 
     `simulate='mean'` (default) reduces the ensemble dimension with a plain
     mean, as before. `simulate='best'` instead indexes the single ensemble
-    member with the best training-data fit (model.best_member_idx, set by
-    PolynomialRNN.select_best_member() at the end of fit() — see
-    sindy_rnn/training.py). Determined at training time regardless of which
-    mode is requested at predict()/simulate() time, so switching between the
-    two doesn't require retraining.
+    member with the best held-out (or, absent that, training) fit
+    (model.best_member_idx, set by PolynomialRNN.select_best_member() at
+    the end of fit() — see sindy_rnn/training.py). `simulate='bic'` instead
+    indexes the member with the best BIC on training data
+    (model.bic_member_idx, set by select_best_member_bic()) — same
+    training-data fit as 'best' falls back to, but penalized by term count,
+    so it also rewards sparsity rather than fit alone. All three are
+    determined at training time regardless of which mode is requested at
+    predict()/simulate() time, so switching between them doesn't require
+    retraining.
     """
 
     def __init__(self, device='cpu', **kwargs):
@@ -45,9 +63,11 @@ class PolynomialRNNEstimator:
         self.model = None
 
     def _reduce_ensemble(self, tensor):
-        """tensor: (E, ...) -> (...) via mean or the stored best member."""
+        """tensor: (E, ...) -> (...) via mean or a stored member index."""
         if self.simulate_mode == 'best':
             return tensor[self.model.best_member_idx]
+        if self.simulate_mode == 'bic':
+            return tensor[self.model.bic_member_idx]
         return tensor.mean(0)
 
     def fit(self, xs, ys):
@@ -81,6 +101,17 @@ class PolynomialRNNEstimator:
                 traj.append(h)
             traj = torch.stack(traj, dim=2)  # (E, B, n_steps+1, n_states)
         return self._reduce_ensemble(traj)[:, 1:].cpu().numpy()
+
+    def get_equations(self):
+        """Equations for whichever member/aggregate predict()/simulate()
+        resolve to: the selected member's own equations for 'best'/'bic',
+        or the ensemble median for 'mean' (a single outlier member
+        shouldn't be able to skew a displayed coefficient the way it can
+        skew a plain mean)."""
+        member = resolve_member(self)
+        if member is not None:
+            return self.model.get_equations(member=member)
+        return self.model.get_equations(aggregate='median')
 
     def save(self, path):
         self.model.save(path)
@@ -162,6 +193,17 @@ class RolloutSINDyRNNEstimator:
         self.model.eval()
         x_hat, _ = self.model.forecast(x0, n_steps, reduction=self.simulate_mode)
         return x_hat[0].cpu().numpy()
+
+    def get_equations(self):
+        """Equations for whichever member/aggregate predict()/simulate()
+        resolve to: the selected member's own equations for 'best'/'bic',
+        or the ensemble median for 'mean' (a single outlier member
+        shouldn't be able to skew a displayed coefficient the way it can
+        skew a plain mean)."""
+        member = resolve_member(self)
+        if member is not None:
+            return self.model.get_equations(member=member)
+        return self.model.get_equations(aggregate='median')
 
     def save(self, path):
         self.model.save(path)
@@ -279,6 +321,17 @@ class SindyShredEstimator:
             out = np.concatenate([out, pad], axis=0)
         return out[:n_steps]
 
+    def get_equations(self):
+        """Format the post-hoc SINDy model as an ODE string, same layout as
+        the other three estimators' get_equations(). No member/aggregate
+        choice here — self.sindy_model is already the single model
+        SINDySHRED's own E_SINDy (see sindy_shred_net.py) resolved to."""
+        if self.sindy_model is None:
+            return '(no post-hoc SINDy model)'
+        names = self.sindy_model.feature_names
+        eqns = self.sindy_model.equations()
+        return '\n'.join(f"({name})' = {eqn}" for name, eqn in zip(names, eqns))
+
     def save(self, path):
         """Saves the raw network weights + post-hoc SINDy model.
 
@@ -327,23 +380,54 @@ class SindyShredEstimator:
 
 
 class StlsqEstimator:
-    """Wraps pysindy's E-SINDy (ensemble STLSQ + bagging + median
-    aggregation). predict()/simulate() reuse the coefficient matrix directly
-    rather than pysindy's own predict()/simulate(), so all four estimators'
-    outputs are Euler-integration-consistent with each other.
+    """Wraps pysindy's E-SINDy (ensemble STLSQ + bagging). predict()/
+    simulate() reuse a coefficient matrix directly rather than pysindy's own
+    predict()/simulate(), so all four estimators' outputs are
+    Euler-integration-consistent with each other.
+
+    Each bagged member is its own self-consistent (coefficients, sparsity
+    structure) fit — elementwise median/mean across members that disagree on
+    *which* terms are active can synthesize a coefficient vector no single
+    member actually produced (e.g. member A keeps x*z and zeros x*y, member
+    B does the opposite; the elementwise median/mean keeps a nonzero blend
+    of both, misrepresenting either fit). So the full ensemble
+    (`coef_stack`, one self-consistent matrix per member) is what gets
+    saved/loaded — mirroring RolloutSINDyRNN/PolynomialRNN's own
+    save-the-whole-ensemble pattern — and reduced to a single coef_matrix
+    only at simulate()/predict() time, via one of:
+
+    `simulate='best'` (recommended over 'mean' for this reason): each
+    member's own one-step Euler prediction MSE is scored on validation data
+    (`xs_val`/`ys_val` passed to fit(), if given) or, if none is given, on
+    the training data itself — the single best-fitting member's own matrix
+    is then used untouched (self-consistent, no cross-member mixing).
+
+    `simulate='mean'` (default, matches the other three estimators'
+    default): plain elementwise mean across coef_stack, then thresholded —
+    still susceptible to the structural-mixing issue above, kept as the
+    cheap/simple default.
     """
 
-    def __init__(self, threshold=0.2, alpha=0.05, n_models=11, degree=2, dt=1.0):
+    def __init__(self, threshold=0.2, alpha=0.05, n_models=11, degree=2, dt=1.0,
+                feature_names=None, simulate='mean'):
         self.threshold = threshold
         self.alpha = alpha
         self.n_models = n_models
         self.degree = degree
         self.dt = dt
-        self.coef_matrix = None
+        self.feature_names = feature_names
+        self.simulate_mode = simulate
+        self.coef_stack = None      # (n_models, n_states, n_terms) — full ensemble
+        self.best_member_idx = 0
+        self.coef_matrix = None     # resolved (n_states, n_terms), per simulate_mode
 
-    def fit(self, xs, ys=None):
+    def fit(self, xs, ys=None, xs_val=None, ys_val=None):
         """xs: (N_time, n_states). ys: optional precomputed derivative
         (N_time, n_states); computed via np.gradient if not given.
+
+        xs_val: optional held-out state trajectory used to pick the best
+            ensemble member (simulate='best'). Falls back to xs (training
+            data) if not given.
         """
         import pysindy as ps
         np.math = math
@@ -354,15 +438,41 @@ class StlsqEstimator:
         ensemble_optimizer = ps.EnsembleOptimizer(
             opt=ps.STLSQ(threshold=self.threshold, alpha=self.alpha),
             bagging=True, n_models=self.n_models)
-        sindy_model = ps.SINDy(
-            optimizer=ensemble_optimizer, feature_library=ps.PolynomialLibrary(degree=self.degree))
+        sindy_model = ps.SINDy(optimizer=ensemble_optimizer, feature_library=ps.PolynomialLibrary(degree=self.degree))
         sindy_model.fit(z, t=self.dt, x_dot=z_dot)
 
-        coef_stack = np.array(ensemble_optimizer.coef_list)
-        coef_matrix = np.median(coef_stack, axis=0)
-        coef_matrix[np.abs(coef_matrix) < self.threshold] = 0
-        self.coef_matrix = coef_matrix
+        self.coef_stack = np.array(ensemble_optimizer.coef_list)  # (n_models, n_states, n_terms)
+
+        z_eval = np.asarray(xs_val) if xs_val is not None else z
+        self.best_member_idx = self._select_best_member(z_eval)
+        self._resolve_coef_matrix()
+
+        print("\nDiscovered equations:")
+        print(self.get_equations())
+
         return self
+
+    def _select_best_member(self, z_eval):
+        """Score each ensemble member's own one-step Euler prediction MSE on
+        z_eval and return the index of the lowest-MSE member."""
+        if len(self.coef_stack) == 1 or len(z_eval) < 2:
+            return 0
+        library = np.stack([self._library(h) for h in z_eval])  # (N, n_terms)
+        best_idx, best_mse = 0, np.inf
+        for i, coef in enumerate(self.coef_stack):
+            pred = z_eval + self.dt * (library @ coef.T)
+            mse = np.mean((pred[:-1] - z_eval[1:]) ** 2)
+            if mse < best_mse:
+                best_idx, best_mse = i, mse
+        return best_idx
+
+    def _resolve_coef_matrix(self):
+        if self.simulate_mode == 'best':
+            coef = self.coef_stack[self.best_member_idx].copy()
+        else:
+            coef = self.coef_stack.mean(axis=0)
+            coef[np.abs(coef) < self.threshold] = 0
+        self.coef_matrix = coef
 
     def _library(self, h):
         from itertools import combinations_with_replacement
@@ -376,6 +486,48 @@ class StlsqEstimator:
                 terms.append(val)
         return np.array(terms)
 
+    def get_equations(self):
+        """Format the resolved coefficients as an ODE string, unlike
+        pysindy's own sindy_model.print() (a separate, differently-
+        aggregated coefficient source).
+
+        For simulate='best' this is self.coef_matrix — self-consistent with
+        what predict()/simulate() actually use. For simulate='mean' this
+        instead reports the elementwise ensemble *median* across
+        coef_stack: predict()/simulate() still use the plain mean (changing
+        that would alter forecast/reconstruction outputs, not just the
+        printed report), but a mean lets one outlier bagged member skew a
+        displayed coefficient the way a median doesn't.
+        """
+        if self.simulate_mode == 'best':
+            coef_matrix = self.coef_matrix
+        else:
+            coef_matrix = np.median(self.coef_stack, axis=0)
+            coef_matrix[np.abs(coef_matrix) < self.threshold] = 0
+
+        from sindy_rnn.polynomial_library import get_library_feature_names
+        names = self.feature_names or ([f'x{i}' for i in range(coef_matrix.shape[0])])
+        term_names = get_library_feature_names(names, self.degree)
+        lines = []
+        for i, state_name in enumerate(names):
+            parts = []
+            for j, term_name in enumerate(term_names):
+                val = coef_matrix[i, j]
+                if abs(val) < 1e-6:
+                    continue
+                sign = '+' if val >= 0 else '-'
+                label = f"{abs(val):.3f}" if term_name == '1' else f"{abs(val):.3f}*{term_name}"
+                parts.append((sign, label))
+            if not parts:
+                rhs = '0'
+            else:
+                sign0, label0 = parts[0]
+                rhs = f"-{label0}" if sign0 == '-' else label0
+                for sign, label in parts[1:]:
+                    rhs += f" {sign} {label}"
+            lines.append(f"d{state_name}/dt = {rhs}")
+        return '\n'.join(lines)
+
     def predict(self, xs):
         """One Euler step forward at each row of xs. Returns (N_time, n_states)."""
         xs = np.asarray(xs)
@@ -385,24 +537,46 @@ class StlsqEstimator:
             out[t] = h + self.dt * dh
         return out
 
+    def _deriv(self, h):
+        return self._library(h) @ self.coef_matrix.T
+
     def simulate(self, x0, n_steps):
-        """Autonomous Euler integration from x0 (n_states,) for n_steps."""
+        """Autonomous RK4 integration from x0 (n_states,) for n_steps.
+
+        RK4 (not Euler) to match PolynomialRNNEstimator.simulate()'s
+        integrator — otherwise forecast MSE partly measures integrator
+        truncation error instead of coefficient quality (see CLAUDE.md
+        §14.1's shared-evaluation-protocol rule).
+        """
         h = np.asarray(x0, dtype=np.float64).copy()
         traj = []
         for _ in range(n_steps):
-            dh = self._library(h) @ self.coef_matrix.T
-            h = h + self.dt * dh
+            k1 = self._deriv(h)
+            k2 = self._deriv(h + self.dt / 2 * k1)
+            k3 = self._deriv(h + self.dt / 2 * k2)
+            k4 = self._deriv(h + self.dt * k3)
+            h = h + self.dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
             traj.append(h.copy())
             if np.any(np.abs(h) > 1e6):
                 break
         return np.array(traj)
 
     def save(self, path):
-        np.savez_compressed(path, coef_matrix=self.coef_matrix, dt=self.dt, degree=self.degree)
+        np.savez_compressed(
+            path, coef_stack=self.coef_stack, dt=self.dt, degree=self.degree,
+            threshold=self.threshold, best_member_idx=self.best_member_idx,
+            simulate_mode=self.simulate_mode,
+            feature_names=np.array(self.feature_names) if self.feature_names else np.array([]))
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, simulate=None):
         cached = np.load(path)
-        est = cls(dt=float(cached['dt']), degree=int(cached['degree']))
-        est.coef_matrix = cached['coef_matrix']
+        feature_names = list(cached['feature_names']) if cached['feature_names'].size else None
+        est = cls(
+            dt=float(cached['dt']), degree=int(cached['degree']),
+            threshold=float(cached['threshold']), feature_names=feature_names,
+            simulate=simulate if simulate is not None else str(cached['simulate_mode'].item()))
+        est.coef_stack = cached['coef_stack']
+        est.best_member_idx = int(cached['best_member_idx'])
+        est._resolve_coef_matrix()
         return est

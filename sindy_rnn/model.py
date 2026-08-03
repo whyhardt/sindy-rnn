@@ -604,6 +604,16 @@ class PolynomialRNN(nn.Module):
         # predate this buffer, via load()'s strict=False).
         self.register_buffer('best_member_idx', torch.zeros((), dtype=torch.long))
 
+        # Index of the ensemble member with the best BIC on training data,
+        # set by select_best_member_bic() at the end of training. A third
+        # option alongside 'mean'/'best' for predict()/simulate() (see
+        # examples/_common/estimators.py's `simulate=` mode): trades
+        # best_member_idx's held-out MSE ranking (favors whichever member
+        # reconstructs unseen data most accurately, regardless of how many
+        # terms it uses) for one that also rewards sparsity, computed from
+        # training data alone.
+        self.register_buffer('bic_member_idx', torch.zeros((), dtype=torch.long))
+
         # Library term names
         feature_names = self.state_names + self.control_names
         self.library_terms = get_library_feature_names(feature_names, polynomial_degree)
@@ -651,17 +661,20 @@ class PolynomialRNN(nn.Module):
         predictions = torch.stack(predictions, dim=2)  # (E, B, T, n_states)
         return predictions, predictions[:, :, -1, :]
 
-    def get_equations(self, member: Optional[int] = None) -> str:
+    def get_equations(self, member: Optional[int] = None, aggregate: Union[bool, str] = True) -> str:
         """Return discovered equations as formatted string.
 
         member: if given (e.g. self.best_member_idx.item() after
             select_best_member()), report that single ensemble member's own
-            equations instead of the ensemble-mean aggregate.
+            equations instead of the ensemble aggregate.
+        aggregate: ignored when member is given. True/'mean' (default) or
+            'median' — see equations.get_coefficients().
         """
         from .equations import get_equations
-        return get_equations(self, member=member)
+        return get_equations(self, member=member, aggregate=aggregate)
 
-    def get_continuous_equations(self, dt: float = None, member: Optional[int] = None) -> str:
+    def get_continuous_equations(self, dt: float = None, member: Optional[int] = None,
+                                 aggregate: Union[bool, str] = True) -> str:
         """Return continuous-time ODE form of discovered equations.
 
         With Euler parameterization, theta directly represents the ODE.
@@ -669,7 +682,7 @@ class PolynomialRNN(nn.Module):
         (model's stored dt is used).
         """
         from .equations import get_continuous_equations
-        return get_continuous_equations(self, member=member)
+        return get_continuous_equations(self, member=member, aggregate=aggregate)
 
     def get_coefficients(self, aggregate=True, member: Optional[int] = None) -> Dict[str, Tensor]:
         """Return effective polynomial coefficients per state dimension."""
@@ -689,9 +702,9 @@ class PolynomialRNN(nn.Module):
             result[name] = active.sum().item()
         return result
 
-    def print_equations(self, member: Optional[int] = None):
+    def print_equations(self, member: Optional[int] = None, aggregate: Union[bool, str] = True):
         """Print discovered equations to stdout."""
-        print(self.get_equations(member=member))
+        print(self.get_equations(member=member, aggregate=aggregate))
 
     def select_best_member(self, xs: Tensor, ys: Tensor) -> int:
         """Score each ensemble member's own next-step prediction fit on
@@ -722,6 +735,48 @@ class PolynomialRNN(nn.Module):
             self.best_member_idx.fill_(int(torch.argmin(member_loss).item()))
         self.train(was_training)
         return self.best_member_idx.item()
+
+    def select_best_member_bic(self, xs: Tensor, ys: Tensor) -> int:
+        """Score each ensemble member by BIC on (xs, ys) and store the best
+        (lowest-BIC) member's index in bic_member_idx.
+
+        BIC = n*ln(RSS/n) + k*ln(n), with RSS/n the same NaN-masked
+        next-step prediction MSE select_best_member() uses, and k the
+        member's own active (unmasked) term count summed across all state
+        equations. Unlike select_best_member() (which ranks purely by fit
+        and is meant to run on held-out data), BIC's k*ln(n) penalty
+        rewards sparser members, so it is meaningful on training data alone.
+
+        Args:
+            xs: (B, T, n_states + n_controls) — training inputs
+            ys: (B, T, n_states) — training targets
+
+        Returns:
+            Index of the lowest-BIC ensemble member (also stored on the model).
+        """
+        was_training = self.training
+        self.eval()
+        with torch.no_grad():
+            preds, _ = self.forward(xs)  # (E, B, T, n_states)
+            target = ys.unsqueeze(0).expand_as(preds)
+            valid = ~torch.isnan(target.sum(-1))  # (E, B, T)
+            se = ((preds - target) ** 2) * valid.unsqueeze(-1)
+            # n = number of time-domain samples (frames), NOT multiplied by
+            # n_states — mirrors sindy-shred.py's auto_tune_threshold(),
+            # whose n_samples is time steps only even though its mse is
+            # averaged over all state dims. See rollout.select_best_member_bic
+            # for why multiplying n by the output dimension is wrong.
+            n_frames = valid.sum(dim=(1, 2)).clamp(min=1)  # (E,)
+            rss = se.sum(dim=(1, 2, 3))  # (E,)
+            mse = rss / (n_frames * self.n_states)
+            k = torch.tensor(
+                [sum(self.count_active_terms(member=e).values()) for e in range(self.ensemble_size)],
+                dtype=torch.float32, device=rss.device,
+            )
+            bic = n_frames * torch.log(mse) + k * torch.log(n_frames)
+            self.bic_member_idx.fill_(int(torch.argmin(bic).item()))
+        self.train(was_training)
+        return self.bic_member_idx.item()
 
     def save(self, path: str):
         """Save model weights + sparsity masks + patience counters."""

@@ -18,7 +18,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from examples._common.estimators import PolynomialRNNEstimator, RolloutSINDyRNNEstimator, StlsqEstimator
+from examples._common.estimators import PolynomialRNNEstimator, RolloutSINDyRNNEstimator, StlsqEstimator, resolve_member
 from examples._common.plotting import plot_trajectory_grid
 from data import (
     load_config, generate_or_load_data, compute_forecast_mse,
@@ -117,7 +117,7 @@ def main():
         print("\nEvaluating sindy-rnn...")
         est = PolynomialRNNEstimator.load(
             rnn_path, simulate=cfg['sindy_rnn'].get('simulate', 'mean'))
-        member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+        member = resolve_member(est)
         coef_matrix = get_coef_matrix(est.model, member=member)
 
         sim = est.simulate(h0[None, :], lcfg['forecast_steps'])[0]
@@ -126,7 +126,7 @@ def main():
         m = coefficient_metrics(coef_matrix)
         m.update({'forecast_mse': float(fore_mse), 'n_valid': int(n_valid),
                   'n_active': sum(est.model.count_active_terms(member=member).values()),
-                  'equations': est.model.get_equations(member=member)})
+                  'equations': est.get_equations()})
         metrics['sindy-rnn'] = m
         sims['sindy-rnn'] = sim
 
@@ -134,6 +134,7 @@ def main():
               f"Exact match: {m['exact_match']}")
         print(f"  Forecast MSE: {fore_mse:.6f} ({n_valid} valid steps)")
         print(f"  Active terms: {m['n_active']}")
+        print(f"  Equations:\n{m['equations']}")
     else:
         print(f"\nSkipping sindy-rnn: {rnn_path} not found (run train_sindy_rnn.py first)")
 
@@ -144,7 +145,7 @@ def main():
         est = RolloutSINDyRNNEstimator.load(
             rollout_path, T_w=1,
             simulate=cfg['sindy_rnn_rollout'].get('simulate', 'mean'))
-        member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+        member = resolve_member(est)
         coef_matrix = get_coef_matrix(est.model.dynamics, member=member)
 
         sim = est.simulate(h0[None, :], lcfg['forecast_steps'])
@@ -153,7 +154,7 @@ def main():
         m = coefficient_metrics(coef_matrix)
         m.update({'forecast_mse': float(fore_mse), 'n_valid': int(n_valid),
                   'n_active': sum(est.model.count_active_terms(member=member).values()),
-                  'equations': est.model.get_equations(member=member)})
+                  'equations': est.get_equations()})
         metrics['sindy-rnn-rollout'] = m
         sims['sindy-rnn-rollout'] = sim
 
@@ -161,6 +162,7 @@ def main():
               f"Exact match: {m['exact_match']}")
         print(f"  Forecast MSE: {fore_mse:.6f} ({n_valid} valid steps)")
         print(f"  Active terms: {m['n_active']}")
+        print(f"  Equations:\n{m['equations']}")
     else:
         print(f"\nSkipping sindy-rnn-rollout: {rollout_path} not found "
               f"(run train_sindy_rnn_rollout.py first)")
@@ -169,7 +171,7 @@ def main():
     stlsq_path = os.path.join(PARAMS_DIR, 'stlsq.npz')
     if os.path.exists(stlsq_path):
         print("\nEvaluating STLSQ...")
-        est = StlsqEstimator.load(stlsq_path)
+        est = StlsqEstimator.load(stlsq_path, simulate=cfg['stlsq'].get('simulate'))
         coef_matrix = est.coef_matrix
 
         sim = est.simulate(h0, lcfg['forecast_steps'])
@@ -177,7 +179,8 @@ def main():
 
         m = coefficient_metrics(coef_matrix)
         m.update({'forecast_mse': float(fore_mse), 'n_valid': int(n_valid),
-                  'n_active': int(np.count_nonzero(coef_matrix))})
+                  'n_active': int(np.count_nonzero(coef_matrix)),
+                  'equations': est.get_equations()})
         metrics['stlsq'] = m
         # Cap to forecast_steps for plotting — clean_test may be longer than
         # the current config's forecast_steps if it came from a stale cache
@@ -188,6 +191,7 @@ def main():
               f"Exact match: {m['exact_match']}")
         print(f"  Forecast MSE: {fore_mse:.6f} ({n_valid} valid steps)")
         print(f"  Active terms: {m['n_active']}")
+        print(f"  Equations:\n{m['equations']}")
     else:
         print(f"\nSkipping STLSQ: {stlsq_path} not found (run train_stlsq.py first)")
 

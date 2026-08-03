@@ -97,7 +97,9 @@ def run_sindy_rnn(trajectory_noisy, direct, seed):
 
 def run_esindy(trajectory_noisy):
     est = StlsqEstimator(threshold=ESINDY_CONFIG['threshold'], alpha=ESINDY_CONFIG['alpha'],
-                         n_models=ESINDY_CONFIG['n_models'], degree=2, dt=DT)
+                         n_models=ESINDY_CONFIG['n_models'], degree=2, dt=DT,
+                         feature_names=['x', 'y', 'z'],
+                         simulate=ESINDY_CONFIG.get('simulate', 'mean'))
     est.fit(trajectory_noisy)
     n_active = int(np.count_nonzero(est.coef_matrix))
     return est.coef_matrix, n_active

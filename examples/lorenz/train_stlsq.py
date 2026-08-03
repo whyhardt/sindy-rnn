@@ -1,5 +1,5 @@
-"""Train E-SINDy (ensemble STLSQ + bagging + median aggregation) on the same
-noisy Lorenz trajectory sindy-rnn uses, and save coefficients to params/.
+"""Train E-SINDy (ensemble STLSQ + bagging) on the same noisy Lorenz
+trajectory sindy-rnn uses, and save the whole ensemble to params/.
 
 Wrapped in StlsqEstimator for the same fit()/predict()/simulate()/save()/
 load() interface as the sindy-rnn estimators.
@@ -30,17 +30,18 @@ def main():
     z = data['noisy_train']
 
     est = StlsqEstimator(threshold=scfg['threshold'], alpha=scfg['alpha'],
-                         n_models=scfg['n_models'], degree=2, dt=lcfg['dt'])
+                         n_models=scfg['n_models'], degree=2, dt=lcfg['dt'],
+                         feature_names=['x', 'y', 'z'], simulate=scfg.get('simulate', 'mean'))
     est.fit(z)
 
     n_active = int(np.count_nonzero(est.coef_matrix))
-    print(f"\n  Active terms: {n_active}")
-    print(f"  Coefficients:\n{est.coef_matrix}")
+    print(f"\n  Active terms: {n_active}"
+          f"{' (best member)' if est.simulate_mode == 'best' else ' (ensemble mean)'}")
 
     os.makedirs(PARAMS_DIR, exist_ok=True)
     save_path = os.path.join(PARAMS_DIR, 'stlsq.npz')
     est.save(save_path)
-    print(f"\n  Saved coefficients to {save_path}")
+    print(f"\n  Saved ensemble ({est.n_models} members) to {save_path}")
 
 
 if __name__ == '__main__':

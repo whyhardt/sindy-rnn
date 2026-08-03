@@ -1,8 +1,9 @@
 """Lorenz data generation + ground truth. Values come from config.yaml so
 train_sindy_rnn.py, train_stlsq.py, and analyze.py stay in sync.
 
-The noisy training trajectory is cached to data/lorenz_data.npz on first
-generation so both training scripts see byte-identical data.
+Generation is deterministic (fixed seeds from config.yaml), so every script
+that calls generate_or_load_data() with the same config gets byte-identical
+data without needing to share a cache file.
 """
 import os
 from itertools import combinations_with_replacement
@@ -14,7 +15,6 @@ EXAMPLE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(EXAMPLE_DIR, 'data')
 PARAMS_DIR = os.path.join(EXAMPLE_DIR, 'params')
 RESULTS_DIR = os.path.join(EXAMPLE_DIR, 'results')
-CACHE_PATH = os.path.join(DATA_DIR, 'lorenz_data.npz')
 
 # True continuous-time coefficients for a degree-2 polynomial library.
 # Library order: [1, x, y, z, x^2, x*y, x*z, y^2, y*z, z^2]
@@ -125,17 +125,13 @@ def compute_forecast_mse(true_traj, sim_traj):
 
 
 def generate_or_load_data(cfg):
-    """Generate (or load cached) noisy training trajectory + a clean
-    held-out trajectory for forecast evaluation.
+    """Generate a fresh noisy training trajectory + a clean held-out
+    trajectory for forecast evaluation.
 
     Returns dict with 'clean_train', 'noisy_train', 'clean_test' arrays,
     each (n_steps+1, 3).
     """
     lcfg = cfg['lorenz']
-
-    if os.path.exists(CACHE_PATH):
-        cached = np.load(CACHE_PATH)
-        return {k: cached[k] for k in ('clean_train', 'noisy_train', 'clean_test')}
 
     clean_train = generate_lorenz(
         lcfg['n_steps'], lcfg['dt'], lcfg['sigma'], lcfg['rho'], lcfg['beta'],
@@ -144,10 +140,5 @@ def generate_or_load_data(cfg):
     clean_test = generate_lorenz(
         lcfg['forecast_steps'], lcfg['dt'], lcfg['sigma'], lcfg['rho'], lcfg['beta'],
         seed=lcfg['seed'] + 1)
-
-    os.makedirs(DATA_DIR, exist_ok=True)
-    np.savez_compressed(
-        CACHE_PATH, clean_train=clean_train, noisy_train=noisy_train,
-        clean_test=clean_test)
 
     return {'clean_train': clean_train, 'noisy_train': noisy_train, 'clean_test': clean_test}

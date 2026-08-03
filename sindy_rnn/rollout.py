@@ -307,6 +307,8 @@ class RolloutSINDyRNN(nn.Module):
                 over the dynamics ensemble. 'best' instead decodes only the
                 single member at dyn.best_member_idx (set by
                 select_best_member() — see rollout.select_best_member).
+                'bic' instead decodes the single member at
+                dyn.bic_member_idx (set by select_best_member_bic()).
 
         Returns:
             x_hat: (B, n_steps, n_full) — decoded forecast (excludes initial z_0)
@@ -330,6 +332,8 @@ class RolloutSINDyRNN(nn.Module):
             z_raw = self._denormalize_z(z_traj)
             if reduction == 'best':
                 x_hat = self.decoder(z_raw[dyn.best_member_idx])  # (B, n_steps, n_full)
+            elif reduction == 'bic':
+                x_hat = self.decoder(z_raw[dyn.bic_member_idx])  # (B, n_steps, n_full)
             else:
                 x_hat = self.decoder(z_raw.mean(0))  # (B, n_steps, n_full)
 
@@ -389,11 +393,12 @@ class RolloutSINDyRNN(nn.Module):
         """Return autonomous dynamics (refit) if available, else dynamics."""
         return getattr(self, 'autonomous_dynamics', self.dynamics)
 
-    def get_equations(self, member: Optional[int] = None) -> str:
-        return self._eq_dynamics.get_equations(member=member)
+    def get_equations(self, member: Optional[int] = None, aggregate=True) -> str:
+        return self._eq_dynamics.get_equations(member=member, aggregate=aggregate)
 
-    def get_continuous_equations(self, dt: float = None, member: Optional[int] = None) -> str:
-        return self._eq_dynamics.get_continuous_equations(dt, member=member)
+    def get_continuous_equations(self, dt: float = None, member: Optional[int] = None,
+                                 aggregate=True) -> str:
+        return self._eq_dynamics.get_continuous_equations(dt, member=member, aggregate=aggregate)
 
     def get_coefficients(self, aggregate=True, member: Optional[int] = None) -> Dict[str, Tensor]:
         return self._eq_dynamics.get_coefficients(aggregate=aggregate, member=member)
@@ -401,14 +406,21 @@ class RolloutSINDyRNN(nn.Module):
     def count_active_terms(self, member: Optional[int] = None) -> Dict[str, int]:
         return self._eq_dynamics.count_active_terms(member=member)
 
-    def print_equations(self, member: Optional[int] = None):
-        self._eq_dynamics.print_equations(member=member)
+    def print_equations(self, member: Optional[int] = None, aggregate=True):
+        self._eq_dynamics.print_equations(member=member, aggregate=aggregate)
 
     @property
     def best_member_idx(self):
         """Index set by rollout.select_best_member() on the active dynamics
         module — the same member simulate() uses when simulate='best'."""
         return self._eq_dynamics.best_member_idx
+
+    @property
+    def bic_member_idx(self):
+        """Index set by rollout.select_best_member_bic() on the active
+        dynamics module — the same member simulate() uses when
+        simulate='bic'."""
+        return self._eq_dynamics.bic_member_idx
 
     def save(self, path: str):
         """Save model weights + constructor config.
@@ -476,8 +488,8 @@ def fit_rollout(
     epochs: int = 5000,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
-    lambda_0: float = 1e-3,
-    lambda_s: float = 1e-3,
+    lambda_0: float = 0,
+    lambda_s: float = 0,
     weight_decay: float = 0.,
     grad_clip: float = 0.5,
     batches_per_epoch: int = 4,
@@ -487,6 +499,7 @@ def fit_rollout(
     agreement_frac: float = 0.5,
     ladder_exponent_step: float = 0.2,
     ladder_offset: float = -1.0,
+    patience_limit: int = 2,
     lr_patience: int = 0,
     lr_factor: float = 0.5,
     min_lr: float = 1e-6,
@@ -512,8 +525,10 @@ def fit_rollout(
     Curriculum schedule:
         T_cur(epoch) = min(T_max, T_start + floor(epoch / E_step) * delta_T)
 
-    Sparsity (L2 + pruning) activates only after the curriculum reaches T_max,
-    avoiding the moving-target problem from premature sparsification.
+    L2 shrinkage on theta (lambda_s) is always active, from epoch 0. Only
+    the hard prune-to-zero step is deferred until the curriculum reaches
+    T_max, avoiding the moving-target problem from pruning against a
+    dynamics module that hasn't yet learned to integrate that far.
 
     Args:
         model: RolloutSINDyRNN instance (already on target device)
@@ -548,6 +563,9 @@ def fit_rollout(
             pruning_method='ladder'. Member e's threshold is
             pruning_threshold * 10 ** (ladder_exponent_step * e +
             ladder_offset). Defaults mirror SINDy-SHRED's E_SINDy.thresholding().
+        patience_limit: consecutive failed pruning events before permanent
+            removal (default 2, see CLAUDE.md §5.3). 1 = prune immediately
+            on the first failure.
         lr_patience: ReduceLROnPlateau patience (0 = no scheduler)
         lr_factor: LR reduction factor on plateau
         min_lr: minimum learning rate
@@ -684,9 +702,12 @@ def fit_rollout(
                 L_sp = 0.
                 if lambda_s > 0:
                     theta = model.dynamics.rnn.unfold_polynomial_coefficients()
+                    # L_sp = lambda_s * theta.shape[0] * (
+                    #     theta * model.dynamics.coefficient_masks.float()
+                    # ).pow(2).mean()
                     L_sp = lambda_s * theta.shape[0] * (
                         theta * model.dynamics.coefficient_masks.float()
-                    ).pow(2).mean()
+                    ).abs().mean()
 
                 loss = L_rec + L_z0 + L_sp
 
@@ -706,14 +727,31 @@ def fit_rollout(
 
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                if not torch.isfinite(total_norm):
+                    # loss can look finite while backward() still produces
+                    # nan/inf gradients (e.g. overflow inside the polynomial
+                    # product that cancels back to a finite loss value) —
+                    # the loss-only check above doesn't catch this. Skip the
+                    # step instead of applying a nan/inf update to every
+                    # parameter (and poisoning Adam's moment buffers for good).
+                    if verbose:
+                        tqdm.write(f"  Non-finite gradient at epoch {epoch}, batch {bi}: "
+                                   f"skipping optimization step")
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
                 optimizer.step()
 
                 epoch_rec_loss += L_rec.item()
                 epoch_total_loss += loss.item()
                 n_batches += 1
 
-            if scheduler is not None:
+            if scheduler is not None and use_sparsity:
+                # Gated the same as pruning: before the curriculum reaches
+                # T_max, the objective itself changes every E_step epochs
+                # (T_cur grows), so a rising loss reflects a harder task,
+                # not a plateau. Plateau detection is only meaningful once
+                # T_cur is held fixed at T_max.
                 scheduler.step(epoch_rec_loss / max(n_batches, 1))
 
             # Pruning (after curriculum completes)
@@ -729,12 +767,14 @@ def fit_rollout(
                                 agreement_frac=agreement_frac,
                                 ladder_exponent_step=ladder_exponent_step,
                                 ladder_offset=ladder_offset,
-                                max_prune=max_prune)
+                                max_prune=max_prune,
+                                patience_limit=patience_limit)
                         else:
                             threshold_patience_update(
                                 model.dynamics,
                                 threshold=pruning_threshold)
-                            threshold_prune(model.dynamics, max_prune=max_prune)
+                            threshold_prune(model.dynamics, max_prune=max_prune,
+                                            patience_limit=patience_limit)
 
             # Logging: postfix, including validation eval, updates every epoch.
             if verbose:
@@ -850,7 +890,13 @@ def fit_rollout(
 
                     refit_optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.dynamics.parameters(), grad_clip)
+                    total_norm = torch.nn.utils.clip_grad_norm_(model.dynamics.parameters(), grad_clip)
+                    if not torch.isfinite(total_norm):
+                        if verbose:
+                            tqdm.write(f"  Non-finite gradient in refit epoch {r_epoch}: "
+                                       f"skipping optimization step")
+                        refit_optimizer.zero_grad(set_to_none=True)
+                        continue
                     refit_optimizer.step()
 
                     epoch_rec_loss += loss.item()
@@ -887,6 +933,11 @@ def fit_rollout(
         select_best_member(model, x_sparse_test, x_full_test, T_w, T_max, batch_size)
     else:
         select_best_member(model, x_sparse_all, x_full_all, T_w, T_max, batch_size)
+
+    # BIC ranking is a separate, parallel selection ('simulate: bic') —
+    # its sparsity penalty only means anything on the data the model was
+    # actually fit to, so always use the training set here (never test).
+    select_best_member_bic(model, x_sparse_all, x_full_all, T_w, T_max, batch_size)
 
     if verbose:
         print("\nDiscovered equations:")
@@ -942,16 +993,100 @@ def select_best_member(model: RolloutSINDyRNN, x_sparse_all: Tensor,
             theta_masked = theta * dyn.coefficient_masks.float()
             z_stack = model._rollout(z, T_eval, theta_masked, include_init=True)
             z_raw = model._denormalize_z(z_stack)
-            x_hat = model.decoder(z_raw)  # (E, B, T_eval+1, n_full)
 
-            se = (x_hat - x_targets.unsqueeze(0)) ** 2
-            total_se += se.sum(dim=(1, 2, 3))
-            total_n += x_hat[0].numel()
+            # Decode one ensemble member at a time — decoding all E at once
+            # (E, B, T_eval+1, n_full) can be huge for large full_dim (e.g.
+            # SST's 44219): with E=10 that's a 10x larger allocation than
+            # needed, since each member's squared error is independent.
+            for e in range(E):
+                x_hat_e = model.decoder(z_raw[e])  # (B, T_eval+1, n_full)
+                total_se[e] += ((x_hat_e - x_targets) ** 2).sum()
+            total_n += x_targets.numel()
 
     model.train()
     if total_n > 0:
         member_loss = total_se / total_n
         dyn.best_member_idx.fill_(int(torch.argmin(member_loss).item()))
+
+
+def select_best_member_bic(model: RolloutSINDyRNN, x_sparse_all: Tensor,
+                           x_full_all: Tensor, T_w: int, T_eval: int,
+                           batch_size: int = 32, n_windows: int = 50):
+    """Score each ensemble member by BIC on its own autonomous-rollout
+    reconstruction fit and store the lowest-BIC member's index on the
+    active dynamics module (model._eq_dynamics.bic_member_idx).
+
+    Same rollout mechanics as select_best_member() (same windows, same
+    decoded reconstruction), but BIC = n*ln(RSS/n) + k*ln(n) trades pure
+    fit for fit penalized by the member's own active term count — meant
+    to run on training data, where select_best_member()'s ranking alone
+    would favor whichever member simply overfits hardest.
+
+    Returns:
+        (E,) tensor of per-member BIC scores, or None if there wasn't
+        enough data to evaluate any window.
+    """
+    model.eval()
+    dyn = model._eq_dynamics
+    device = next(model.parameters()).device
+    E = model.ensemble_size
+    N = x_sparse_all.shape[0]
+    span = T_w + T_eval
+    max_start = N - span
+    if max_start < 1:
+        return None
+
+    n_windows = min(max_start, n_windows)
+    starts = torch.linspace(0, max_start - 1, n_windows).long()
+
+    total_se = torch.zeros(E, device=device)
+    total_elems = 0
+    total_frames = 0
+
+    with torch.no_grad():
+        for bi in range(0, len(starts), batch_size):
+            s_batch = starts[bi:bi + batch_size]
+            x_warmup = torch.stack(
+                [x_sparse_all[s:s + T_w] for s in s_batch]).to(device)
+            x_targets = torch.stack(
+                [x_full_all[s + T_w - 1:s + T_w - 1 + T_eval + 1]
+                 for s in s_batch]).to(device)
+
+            z = model.encode(x_warmup)  # (E, B, n_latent)
+            if dyn is not model.dynamics:
+                z = model._normalize_z(z)
+
+            theta = dyn.rnn.unfold_polynomial_coefficients()
+            theta_masked = theta * dyn.coefficient_masks.float()
+            z_stack = model._rollout(z, T_eval, theta_masked, include_init=True)
+            z_raw = model._denormalize_z(z_stack)
+
+            # Decode one ensemble member at a time — see select_best_member().
+            for e in range(E):
+                x_hat_e = model.decoder(z_raw[e])  # (B, T_eval+1, n_full)
+                total_se[e] += ((x_hat_e - x_targets) ** 2).sum()
+            total_elems += x_targets.numel()
+            total_frames += x_targets.shape[0] * x_targets.shape[1]
+
+    model.train()
+    if total_elems > 0:
+        # n = number of time-domain samples (frames), NOT multiplied by
+        # full_dim — mirrors sindy-shred.py's auto_tune_threshold(), whose
+        # n_samples is len(x_train) (time steps only) even though its mse
+        # is averaged over all latent dims. Multiplying n by full_dim (as
+        # a naive per-scalar-residual BIC would) makes n*log(mse) swamp
+        # k*log(n) by orders of magnitude on high-dim reconstructions,
+        # making the sparsity penalty meaningless.
+        mse = total_se / total_elems
+        n = torch.full((E,), float(total_frames), device=device)
+        k = torch.tensor(
+            [sum(dyn.count_active_terms(member=e).values()) for e in range(E)],
+            dtype=torch.float32, device=device,
+        )
+        bic = n * torch.log(mse) + k * torch.log(n)
+        dyn.bic_member_idx.fill_(int(torch.argmin(bic).item()))
+        return bic
+    return None
 
 
 def _eval_test(model, x_sparse_test, x_full_test, T_w, T_max, batch_size):
@@ -1009,6 +1144,7 @@ def refit_rollout(
     agreement_frac: float = 0.5,
     ladder_exponent_step: float = 0.2,
     ladder_offset: float = -1.0,
+    patience_limit: int = 2,
     centered_diff: bool = True,
     include_bias: bool = True,
     interaction_only: bool = False,
@@ -1038,6 +1174,9 @@ def refit_rollout(
             refit_pruning_method='agreement'.
         ladder_exponent_step, ladder_offset: only used for
             refit_pruning_method='ladder'. See training.fit().
+        patience_limit: consecutive failed pruning events before permanent
+            removal (default 2, see CLAUDE.md §5.3). 1 = prune immediately
+            on the first failure.
         centered_diff: use centered differences for derivative estimation
         include_bias: include constant term in library
         interaction_only: exclude pure power terms
@@ -1106,6 +1245,7 @@ def refit_rollout(
         agreement_frac=agreement_frac,
         ladder_exponent_step=ladder_exponent_step,
         ladder_offset=ladder_offset,
+        patience_limit=patience_limit,
         include_bias=include_bias,
         interaction_only=interaction_only,
         centered_diff=centered_diff,

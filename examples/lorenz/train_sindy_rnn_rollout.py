@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import torch
 
-from examples._common.estimators import RolloutSINDyRNNEstimator
+from examples._common.estimators import RolloutSINDyRNNEstimator, resolve_member
 from data import load_config, generate_or_load_data, PARAMS_DIR
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -59,7 +59,7 @@ def main():
     n_params = sum(p.numel() for p in est.model.parameters())
     print(f"\n  Model: {n_params:,} parameters (dynamics only — identity encoder/decoder)")
 
-    member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+    member = resolve_member(est)
     print(f"\n  Discovered equations{' (best member)' if member is not None else ''}:")
     est.model.print_equations(member=member)
     active = est.model.count_active_terms(member=member)

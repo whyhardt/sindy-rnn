@@ -1,5 +1,4 @@
-torch>=2.0
-numpy
+torch==2.7.1
 scipy
 matplotlib
 pytest

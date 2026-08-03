@@ -197,7 +197,7 @@ def _get_effective_coefficients_raw(model) -> Tensor:
 def ensemble_prune(model, delta: float,
                    method: str = 'agreement', agreement_frac: float = 0.5,
                    ladder_exponent_step: float = 0.2, ladder_offset: float = -1.0,
-                   max_prune: Optional[int] = None):
+                   max_prune: Optional[int] = None, patience_limit: int = 2):
     """Run one pruning step using an ensemble statistical test.
 
     Args:
@@ -221,6 +221,9 @@ def ensemble_prune(model, delta: float,
             ensemble member (each member's mask is its own, so each gets
             its own max_prune-sized allowance per event); for
             'agreement'/'median' it applies once to the single shared mask.
+        patience_limit: number of consecutive failed pruning events a term
+            must accumulate before permanent removal. Default 2 (see
+            CLAUDE.md §5.3). 1 = prune on the first failure, no patience.
     """
     theta = _get_effective_coefficients_raw(model)  # (E, n_states, n_terms)
     mask = model.coefficient_masks  # (E, n_states, n_terms)
@@ -240,7 +243,7 @@ def ensemble_prune(model, delta: float,
             torch.zeros_like(model.pruning_patience)
         )
 
-        candidates = counters >= 2
+        candidates = counters >= patience_limit
         # Per-member budget: each member's mask is independent (no
         # cross-member vote), so each gets its own max_prune-sized budget
         # rather than competing in one shared pool across the ensemble.
@@ -269,9 +272,10 @@ def ensemble_prune(model, delta: float,
     failed_e = failed.unsqueeze(0).expand_as(counters)
     counters = torch.where(failed_e, counters + 1, torch.zeros_like(counters))
 
-    # Permanently prune terms with patience >= 2, capped to max_prune terms
-    # with the smallest |median coefficient| across the whole model.
-    candidates = (counters[0] >= 2)  # (n_states, n_terms)
+    # Permanently prune terms with patience >= patience_limit, capped to
+    # max_prune terms with the smallest |median coefficient| across the
+    # whole model.
+    candidates = (counters[0] >= patience_limit)  # (n_states, n_terms)
     magnitude = (theta * mask.float()).abs().median(dim=0).values  # (n_states, n_terms)
     prune = _apply_prune_budget(candidates, magnitude, max_prune)
 

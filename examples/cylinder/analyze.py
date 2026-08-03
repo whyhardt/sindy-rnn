@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import torch
 
-from examples._common.estimators import RolloutSINDyRNNEstimator, SindyShredEstimator
+from examples._common.estimators import RolloutSINDyRNNEstimator, SindyShredEstimator, resolve_member
 from examples._common.eval import evaluate_on_frames, forecast_mse_per_step
 from examples._common.plotting import (
     plot_field_comparison, plot_latent_dynamics, plot_forecast_mse,
@@ -77,18 +77,20 @@ def main():
         forecast[train_end:] = scaler.inverse_transform(forecast_scaled)
         fore_mse, fore_rel, n_fore = evaluate_on_frames(forecast, X, test_frames)
 
-        member = est.model.best_member_idx.item() if est.simulate_mode == 'best' else None
+        member = resolve_member(est)
         active = est.model.count_active_terms(member=member)
+        equations = est.get_equations()
         print(f"  Reconstruction rel. error: {100 * recon_rel:.2f}% ({n_recon} frames)")
         print(f"  Forecast rel. error:       {100 * fore_rel:.2f}% ({n_fore} frames)")
         print(f"  Active terms: {sum(active.values())}"
               f"{' (best member)' if member is not None else ''}")
+        print(f"  Equations:\n{equations}")
 
         metrics['sindy-rnn'] = {
             'recon_mse': float(recon_mse), 'recon_rel_error': float(recon_rel),
             'forecast_mse': float(fore_mse), 'forecast_rel_error': float(fore_rel),
             'n_active_terms': sum(active.values()),
-            'equations': est.model.get_equations(member=member),
+            'equations': equations,
         }
 
         plot_field_comparison(X, recons, train_end,
@@ -121,14 +123,17 @@ def main():
 
         n_active = (int(np.sum(np.abs(est.sindy_model.coefficients()) > 1e-6))
                    if est.sindy_model is not None else 0)
+        equations = est.get_equations()
         print(f"  Reconstruction rel. error: {100 * recon_rel:.2f}% ({n_recon} frames)")
         print(f"  Forecast rel. error:       {100 * fore_rel:.2f}% ({n_fore} frames)")
         print(f"  Active terms: {n_active}")
+        print(f"  Equations:\n{equations}")
 
         metrics['sindy-shred'] = {
             'recon_mse': float(recon_mse), 'recon_rel_error': float(recon_rel),
             'forecast_mse': float(fore_mse), 'forecast_rel_error': float(fore_rel),
             'n_active_terms': n_active,
+            'equations': equations,
         }
 
         plot_field_comparison(X, recons, train_end,

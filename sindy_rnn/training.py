@@ -30,6 +30,7 @@ def fit(
     pruning_method: str = 'agreement',
     ladder_exponent_step: float = 0.2,
     ladder_offset: float = -1.0,
+    patience_limit: int = 2,
     include_bias: bool = True,
     interaction_only: bool = False,
     refit_epochs: int = 0,
@@ -85,6 +86,9 @@ def fit(
             pruning_method='ladder'. Member e's threshold is
             pruning_threshold * 10 ** (ladder_exponent_step * e +
             ladder_offset). Defaults mirror SINDy-SHRED's E_SINDy.thresholding().
+        patience_limit: consecutive failed pruning events before permanent
+            removal (default 2, see CLAUDE.md §5.3). 1 = prune immediately
+            on the first failure.
         include_bias: if False, mask out constant term before training
         interaction_only: if True, mask out pure power terms before training
         refit_epochs: additional epochs with lambda_s=0 and frozen mask after pruning.
@@ -255,10 +259,11 @@ def fit(
                                        agreement_frac=agreement_frac,
                                        ladder_exponent_step=ladder_exponent_step,
                                        ladder_offset=ladder_offset,
-                                       max_prune=max_prune)
+                                       max_prune=max_prune,
+                                       patience_limit=patience_limit)
                     elif pruning_threshold and pruning_threshold > 0:
                         threshold_patience_update(model, pruning_threshold)
-                        threshold_prune(model, patience_limit=2, max_prune=max_prune)
+                        threshold_prune(model, patience_limit=patience_limit, max_prune=max_prune)
                     n_pruned = n_before - int(model.coefficient_masks.any(dim=0).sum().item())
                 if verbose and n_pruned > 0:
                     print(f"  [prune] epoch {epoch}: removed {n_pruned} term(s) "
@@ -360,3 +365,8 @@ def fit(
         model.select_best_member(xs_test, ys_test)
     else:
         model.select_best_member(xs, ys)
+
+    # BIC ranking is a separate, parallel selection ('simulate: bic') —
+    # its sparsity penalty only means anything on the data the model was
+    # actually fit to, so always use xs/ys here (never xs_test/ys_test).
+    model.select_best_member_bic(xs, ys)
