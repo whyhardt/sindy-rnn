@@ -775,7 +775,13 @@ class PolynomialRNN(nn.Module):
             se = ((preds - target) ** 2) * valid.unsqueeze(-1)
             counts = valid.sum(dim=(1, 2)).clamp(min=1) * self.n_states  # (E,)
             member_loss = se.sum(dim=(1, 2, 3)) / counts
-            self.best_member_idx.fill_(int(torch.argmin(member_loss).item()))
+            # NaN-safe: torch.argmin does not skip NaN — once its running
+            # minimum becomes NaN, every subsequent "x < current_min"
+            # compares False (IEEE 754), so it gets stuck on the first NaN
+            # instead of the true best member. A diverged member (NaN loss)
+            # must never win by comparison accident.
+            safe_loss = torch.where(torch.isnan(member_loss), torch.full_like(member_loss, float('inf')), member_loss)
+            self.best_member_idx.fill_(int(torch.argmin(safe_loss).item()))
         self.train(was_training)
         return self.best_member_idx.item()
 
@@ -821,7 +827,9 @@ class PolynomialRNN(nn.Module):
                 dtype=torch.float32, device=rss.device,
             )
             bic = n_frames * torch.log(mse) + k * torch.log(n_frames)
-            self.bic_member_idx.fill_(int(torch.argmin(bic).item()))
+            # NaN-safe argmin — see select_best_member() for why this matters.
+            safe_bic = torch.where(torch.isnan(bic), torch.full_like(bic, float('inf')), bic)
+            self.bic_member_idx.fill_(int(torch.argmin(safe_bic).item()))
         self.train(was_training)
         return bic, mse
 

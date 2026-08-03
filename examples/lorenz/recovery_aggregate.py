@@ -183,6 +183,49 @@ def plot_f1_heatmap(results, noise_fractions, data_lengths, methods, save_path):
     print(f"F1 heatmap saved to {save_path}")
 
 
+def plot_f1_diff_heatmap(results, noise_fractions, data_lengths, save_path,
+                         method_a='factored', method_b='esindy'):
+    """Heatmap of f1[method_a] - f1[method_b]: positive (green) = method_a
+    better, negative (red) = method_b better. Cells where either method is
+    missing a value are left blank (nan).
+    """
+    diff_matrix = np.full((len(noise_fractions), len(data_lengths)), np.nan)
+    for i, nf in enumerate(noise_fractions):
+        for j, ns in enumerate(data_lengths):
+            vals_a = [r['f1'] for r in results
+                      if r['method'] == method_a and r['noise_frac'] == nf and r['n_steps'] == ns]
+            vals_b = [r['f1'] for r in results
+                      if r['method'] == method_b and r['noise_frac'] == nf and r['n_steps'] == ns]
+            if vals_a and vals_b:
+                diff_matrix[i, j] = np.mean(vals_a) - np.mean(vals_b)
+
+    if np.all(np.isnan(diff_matrix)):
+        print(f"Skipping F1 diff heatmap: no overlapping cells for "
+              f"{method_a!r} vs {method_b!r}")
+        return
+
+    fig, ax = plt.subplots(figsize=(5.5, 4.5))
+    im = ax.imshow(diff_matrix, aspect='auto', cmap='RdYlGn', vmin=-1, vmax=1, origin='lower')
+    ax.set_xticks(range(len(data_lengths))); ax.set_xticklabels(data_lengths, fontsize=8)
+    ax.set_yticks(range(len(noise_fractions)))
+    ax.set_yticklabels([f'{nf:.0%}' for nf in noise_fractions], fontsize=8)
+    ax.set_xlabel('Data length'); ax.set_ylabel('Noise fraction')
+    ax.set_title(f'F1 difference: {LABELS.get(method_a, method_a)} - {LABELS.get(method_b, method_b)}\n'
+                 f'(green = {LABELS.get(method_a, method_a)} better)')
+    plt.colorbar(im, ax=ax, label='F1 difference')
+    for i in range(len(noise_fractions)):
+        for j in range(len(data_lengths)):
+            val = diff_matrix[i, j]
+            if not np.isnan(val):
+                ax.text(j, i, f'{val:+.2f}', ha='center', va='center', fontsize=7,
+                       color='white' if abs(val) > 0.5 else 'black')
+
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"F1 diff heatmap saved to {save_path}")
+
+
 def plot_forecast_grid(results, noise_fractions, data_lengths, methods, save_path):
     """Grid of forecast plots: rows=data sizes, cols=noise levels. Recomputes
     sim_traj from each result's saved coef_matrix (cheap, avoids storing
@@ -262,6 +305,10 @@ def main():
                     os.path.join(RESULTS_DIR, 'lorenz_recovery_plot.png'))
     plot_f1_heatmap(results, noise_fractions, data_lengths, methods,
                     os.path.join(RESULTS_DIR, 'lorenz_recovery_f1_heatmap.png'))
+    if 'factored' in methods and 'esindy' in methods:
+        plot_f1_diff_heatmap(results, noise_fractions, data_lengths,
+                             os.path.join(RESULTS_DIR, 'lorenz_recovery_f1_diff_heatmap.png'),
+                             method_a='factored', method_b='esindy')
     plot_forecast_grid(results, noise_fractions, data_lengths, methods,
                        os.path.join(RESULTS_DIR, 'lorenz_recovery_forecasts.png'))
 

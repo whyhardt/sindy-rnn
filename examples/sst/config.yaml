@@ -29,9 +29,9 @@ sindy_rnn:
   T_max: null                             # max rollout length; null = defaults to test_length
   T_start: 1                              # initial rollout length at curriculum start
   delta_T: 1                              # rollout length increment per curriculum step
-  epochs: 500                             # total training epochs
-  refit_discovery_epochs: 250             # Stage 2.1: mask reset + re-pruned against frozen encoder/decoder
-  refit_debias_epochs: 250                # Stage 2.2: coefficients reset, mask frozen, penalty off
+  epochs: 0                             # total training epochs
+  refit_discovery_epochs: 0             # Stage 2.1: mask reset + re-pruned against frozen encoder/decoder
+  refit_debias_epochs: 0                # Stage 2.2: coefficients reset, mask frozen, penalty off
   learning_rate: 0.005                    # Adam learning rate
   batch_size: 16                          # small — full_dim scales with downsample above
   batches_per_epoch: 8                    # mini-batches sampled per epoch

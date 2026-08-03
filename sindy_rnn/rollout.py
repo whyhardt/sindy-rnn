@@ -906,7 +906,12 @@ def select_best_member(model: RolloutSINDyRNN, x_sparse_all: Tensor,
     model.train()
     if total_n > 0:
         member_loss = total_se / total_n
-        dyn.best_member_idx.fill_(int(torch.argmin(member_loss).item()))
+        # NaN-safe: torch.argmin gets stuck on the first NaN instead of the
+        # true best member (IEEE 754 comparisons against NaN are always
+        # False, so a NaN running-min never gets replaced). A member whose
+        # rollout diverged to NaN must never win by comparison accident.
+        safe_loss = torch.where(torch.isnan(member_loss), torch.full_like(member_loss, float('inf')), member_loss)
+        dyn.best_member_idx.fill_(int(torch.argmin(safe_loss).item()))
 
 
 def select_best_member_bic(model: RolloutSINDyRNN, x_sparse_all: Tensor,
@@ -984,7 +989,9 @@ def select_best_member_bic(model: RolloutSINDyRNN, x_sparse_all: Tensor,
             dtype=torch.float32, device=device,
         )
         bic = n * torch.log(mse) + k * torch.log(n)
-        dyn.bic_member_idx.fill_(int(torch.argmin(bic).item()))
+        # NaN-safe argmin — see select_best_member() for why this matters.
+        safe_bic = torch.where(torch.isnan(bic), torch.full_like(bic, float('inf')), bic)
+        dyn.bic_member_idx.fill_(int(torch.argmin(safe_bic).item()))
         return bic, mse
     return None, None
 

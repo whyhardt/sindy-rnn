@@ -24,13 +24,13 @@ sindy_rnn:
   degree: 2                               # polynomial degree
   ensemble_size: 10                       # number of dynamics ensemble members
   epochs: 5000                            # total training epochs
-  warmup_steps: 500                      # epochs before pruning begins
+  warmup_steps: 2500                      # epochs before pruning begins
   refit_epochs: 5000                      # extra epochs post-pruning, penalty off, mask frozen
   window_size: 100                        # trajectory chunk length per training window
   learning_rate: 0.05                    # AdamW learning rate
   lr_patience: 0                          # ReduceLROnPlateau patience (0 = no scheduler)
-  lambda_s: 0.                           # L1 penalty weight on polynomial coefficients
-  weight_decay: 0.1                        # AdamW weight decay on all params (on top of lambda_s on theta)
+  lambda_s: 0.1                           # L1 penalty weight on polynomial coefficients
+  weight_decay: 0.                        # AdamW weight decay on all params (on top of lambda_s on theta)
   pruning_frequency: 50                   # epochs between pruning passes
   pruning_threshold: 0.5                  # min |coefficient| to count as "present"
   patience_limit: 1                       # consecutive failed pruning events before permanent removal (default 2)

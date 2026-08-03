@@ -232,8 +232,8 @@ def fit(
             # (E, n_states, n_terms) would otherwise dilute the penalty by
             # 1/E as E grows (mirrors fit_rollout()'s lambda_s scaling).
             if lambda_s > 0:
-                # loss = loss + lambda_s * theta.shape[0] * (theta * model.coefficient_masks).abs().mean()
-                loss = loss + lambda_s * theta.shape[0] * (theta * model.coefficient_masks).pow(2).mean()
+                loss = loss + lambda_s * theta.shape[0] * (theta * model.coefficient_masks).abs().mean()
+                # loss = loss + lambda_s * theta.shape[0] * (theta * model.coefficient_masks).pow(2).mean()
 
             if not torch.isfinite(loss):
                 # Mirrors fit_rollout()'s guard: an autonomous forecast term
