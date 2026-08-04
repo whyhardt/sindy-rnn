@@ -8,3 +8,6 @@ params
 __pycache__/
 *.pyc
 *.log
+.vscode
+.pytest_cache
+.claude
